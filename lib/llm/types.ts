@@ -18,6 +18,8 @@ export interface ToolCall {
 export interface TokenUsage {
   prompt_tokens: number; // 输入token
   completion_tokens: number; // 输出token
+  reasoning_tokens: number;  // 推理token
+  cachedInput_tokens: number; // 缓存token
   total_tokens: number; // 总token
 }
 

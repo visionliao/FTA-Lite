@@ -77,7 +77,7 @@ export async function handleChat(
 
   // 定义并应用默认值
   const defaultOptions: Partial<LlmGenerationOptions> = {
-    timeoutMs: 60000,
+    timeoutMs: 90000,
     maxOutputTokens: 8192,
     temperature: 1.0,
     topP: 1.0,
@@ -107,10 +107,11 @@ export async function handleChat(
   if (options?.stream === false) {
     const result = await vercelAIProvider.generateNonStreaming(model, messages, finalConfig);
     console.log(`[handleChat] 成功接收到非流式用量数据:`, result.usage);
+    console.log(`[handleChat] 成功接收到非流式耗时数据:`, result.duration);
 
     return {
       content: result.content || '',
-      usage: result.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+      usage: result.usage || { prompt_tokens: 0, completion_tokens: 0, reasoning_tokens: 0, cachedInput_tokens: 0, total_tokens: 0 },
       duration: result.duration,
     };
   } else {

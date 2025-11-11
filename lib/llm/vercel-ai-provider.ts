@@ -10,7 +10,7 @@ import {
 } from 'ai';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOpenAI } from '@ai-sdk/openai';
-import { ChatMessage, ToolCall, TokenUsage, StreamingResult, LlmProviderResponse, BaseProviderConfig } from './types';
+import { ChatMessage, ToolCall, TokenUsage, DurationUsage, StreamingResult, LlmProviderResponse, BaseProviderConfig } from './types';
 import { McpToolSchema } from './tools/tool-client';
 import { getToolClientInstance } from './tools/tool-client-manager';
 
@@ -74,14 +74,16 @@ export class VercelAIProvider {
         // 使用 jsonSchema() 包装,传递一个返回 schema 的函数
         inputSchema: jsonSchema(() => t.function.parameters),
         execute: async (input: Record<string, unknown>) => {
+          const toolStartTime = Date.now();
           console.log(`\n[Tool Execution] 调用工具: ${t.function.name}`);
           console.log(`[Tool Execution] 工具参数:`, JSON.stringify(input, null, 2));
 
           const toolClient = getToolClientInstance(mcpServerUrl);
           const result = await toolClient.callTool(t.function.name, input);
 
+          const toolDuration = Date.now() - toolStartTime;
           console.log(`[Tool Execution] 工具返回结果:`, JSON.stringify(result, null, 2));
-          console.log(`[Tool Execution] 工具 ${t.function.name} 执行完成\n`);
+          console.log(`[Tool Execution] 工具 ${t.function.name} 执行完成，耗时：${toolDuration}ms\n`);
 
           return result;
         },
@@ -121,11 +123,20 @@ export class VercelAIProvider {
   /**
    * 将 Vercel SDK 的结果适配回我们自己的 LlmProviderResponse 格式
    */
-  private adaptVercelResponse(result: any): LlmProviderResponse {
+  private adaptVercelResponse(result: any, totalDuration: number): LlmProviderResponse {
     const usage: TokenUsage = {
-      prompt_tokens: (result.usage as any)?.promptTokens || 0,
-      completion_tokens: (result.usage as any)?.completionTokens || 0,
-      total_tokens: (result.usage as any)?.totalTokens || 0,
+      prompt_tokens: (result.totalUsage as any)?.inputTokens || 0,
+      completion_tokens: (result.totalUsage as any)?.outputTokens || 0,
+      reasoning_tokens: (result.totalUsage as any)?.reasoningTokens || 0,
+      cachedInput_tokens: (result.totalUsage as any)?.cachedInputTokens || 0,
+      total_tokens: (result.totalUsage as any)?.totalTokens || 0,
+    };
+
+    const duration: DurationUsage = {
+      total_duration: totalDuration,
+      load_duration: 0,
+      prompt_eval_duration: 0,
+      eval_duration: 0,
     };
 
     const toolCalls: ToolCall[] | undefined = result.toolCalls?.map((tc: any) => ({
@@ -136,14 +147,14 @@ export class VercelAIProvider {
 
     // 推理内容会在 result.reasoning 中
     if (result.reasoning) {
-      console.log('[Reasoning]:', result.reasoning);
+      console.log('[大模型思考内容]:', result.reasoning);
     }
 
     return {
       content: result.text || null, // text 现在不包含 <think> 标签
       tool_calls: toolCalls,
       usage: usage,
-      duration: undefined // Vercel SDK 不直接提供详细的耗时信息
+      duration: duration
     };
   }
 
@@ -196,6 +207,8 @@ export class VercelAIProvider {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), options.timeoutMs);
 
+    // 记录总开始时间
+    const totalStartTime = Date.now();
     try {
       const languageModel = this.createModelInstance(model);
 
@@ -213,7 +226,7 @@ export class VercelAIProvider {
       const result = await generateText({
         model: languageModel,
         ...generateOptions,
-        stopWhen: stepCountIs(generateOptions.maxToolCalls),
+        stopWhen: stepCountIs(generateOptions.maxToolCalls), // 最大工具调用次数限制
         signal: controller.signal, // 超时控制
       });
 
@@ -241,7 +254,10 @@ export class VercelAIProvider {
         });
       }
 
-      const adaptedResult = this.adaptVercelResponse(result);
+      const totalDuration = (Date.now() - totalStartTime) * 1e6;
+      console.log(`\n总耗时: ${totalDuration}ns`);
+
+      const adaptedResult = this.adaptVercelResponse(result, totalDuration);
       console.log('大模型回复:', adaptedResult.content || '无');
       return adaptedResult;
     } finally {
@@ -283,19 +299,21 @@ export class VercelAIProvider {
       // 检查是否有工具调用
       const toolCalls = await toolCallsPromise;
       if (toolCalls && toolCalls.length > 0) {
-        const usage = await result.usage;
+        const usage = await result.totalUsage;
 
         return {
           content: null,
           tool_calls: toolCalls.map((tc: any) => ({
-            id: tc.toolCallId, 
-            type: 'function', 
+            id: tc.toolCallId,
+            type: 'function',
             function: { name: tc.toolName, arguments: JSON.stringify(tc.args) }
           })),
-          usage: { 
-            prompt_tokens: (usage as any)?.promptTokens || 0, 
-            completion_tokens: (usage as any)?.completionTokens || 0, 
-            total_tokens: (usage as any)?.totalTokens || 0 
+          usage: {
+            prompt_tokens: (usage as any)?.inputTokens || 0,
+            completion_tokens: (usage as any)?.outputTokens || 0,
+            reasoning_tokens: (usage as any)?.reasoningTokens || 0,
+            cachedInput_tokens: (usage as any)?.cachedInputTokens || 0,
+            total_tokens: (usage as any)?.totalTokens || 0
           },
         };
       }
@@ -304,9 +322,11 @@ export class VercelAIProvider {
       let finalUsageResolver: (usage: TokenUsage | undefined) => void;
       const finalUsagePromise = new Promise<TokenUsage | undefined>(resolve => {
         finalUsageResolver = resolve;
-        result.usage.then(usage => resolve({
-          prompt_tokens: (usage as any)?.promptTokens || 0,
-          completion_tokens: (usage as any)?.completionTokens || 0,
+        result.totalUsage.then(usage => resolve({
+          prompt_tokens: (usage as any)?.inputTokens || 0,
+          completion_tokens: (usage as any)?.outputTokens || 0,
+          reasoning_tokens: (usage as any)?.reasoningTokens || 0,
+          cachedInput_tokens: (usage as any)?.cachedInputTokens || 0,
           total_tokens: (usage as any)?.totalTokens || 0,
         })).catch(() => resolve(undefined));
       });
