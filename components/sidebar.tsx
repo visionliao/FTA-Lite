@@ -65,8 +65,8 @@ export function Sidebar({ activeSection, onSectionChange, collapsed, onToggleCol
               <div className={cn("flex items-center", collapsed ? "justify-center" : "justify-between")}>
                 {!collapsed && (
                   <div>
-                    <h1 className="text-xl font-semibold text-foreground mb-1">FTA</h1>
-                    <p className="text-sm text-muted-foreground">factory test agent<br/>工厂测试工具</p>
+                    <h1 className="text-xl font-semibold text-foreground mb-1">FTA-Lite</h1>
+                    <p className="text-sm text-muted-foreground">factory test agent<br/>工厂测试工具Lite版</p>
                   </div>
                 )}
                 <Button

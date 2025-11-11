@@ -172,17 +172,17 @@ async function runTask(config: any, baseResultDir: string, onProgress: (data: ob
 
   // 创建基础项目上下文（不包含MCP工具）
   let baseProjectContext = `# 系统提示词\n${config.project.systemPrompt}\n\n`
-  const knowledgeDir = join(process.cwd(), "output", "project", config.project.projectName, "knowledge")
-  try {
-    const knowledgeFiles = await readdir(knowledgeDir)
-    for (const fileName of knowledgeFiles) {
-      const content = await readFile(join(knowledgeDir, fileName), 'utf-8')
-      baseProjectContext += `## 知识库文件: ${fileName}\n${content}\n\n`
-      console.error(`读取知识库文件 ${fileName} 成功， 上下文长度: ${baseProjectContext.length}`);
-    }
-  } catch (e) {
-      onProgress({ type: 'log', message: `警告: 未找到或无法读取知识库目录: ${knowledgeDir}` })
-  }
+  // const knowledgeDir = join(process.cwd(), "output", "project", config.project.projectName, "knowledge")
+  // try {
+  //   const knowledgeFiles = await readdir(knowledgeDir)
+  //   for (const fileName of knowledgeFiles) {
+  //     const content = await readFile(join(knowledgeDir, fileName), 'utf-8')
+  //     baseProjectContext += `## 知识库文件: ${fileName}\n${content}\n\n`
+  //     console.error(`读取知识库文件 ${fileName} 成功， 上下文长度: ${baseProjectContext.length}`);
+  //   }
+  // } catch (e) {
+  //     onProgress({ type: 'log', message: `警告: 未找到或无法读取知识库目录: ${knowledgeDir}` })
+  // }
 
   // 创建用于工作模型的上下文（不包含MCP工具JSON）
   const workContext = baseProjectContext

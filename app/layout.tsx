@@ -5,8 +5,8 @@ import { Analytics } from '@vercel/analytics/next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'Factory Test Agent',
-  description: '工厂测试工具',
+  title: 'Factory Test Agent Lite',
+  description: '工厂测试工具Lite版',
   generator: 'vision-liao',
 }
 

@@ -1,7 +1,7 @@
 // lib/llm/model-service.ts
-
-import { createChatProvider } from './model-factory';
-import { ChatMessage, LlmGenerationOptions, StreamingResult, NonStreamingResult, StreamChunk } from './types';
+import { VercelAIProvider } from './vercel-ai-provider';
+import { getProviderConfig } from './model-config';
+import { ChatMessage, LlmGenerationOptions, NonStreamingResult, StreamChunk, BaseProviderConfig } from './types';
 import { ProxyAgent, setGlobalDispatcher } from 'undici';
 
 // 使用一个模块级别的变量确保代理设置只执行一次
@@ -75,26 +75,88 @@ export async function handleChat(
   // 1. 解析输入参数
   const { provider, model } = parseModelSelection(selectedModel);
 
-  // 2. 使用工厂创建对应的 Provider 实例
-  const chatProvider = await createChatProvider(provider, options);
+  // 定义并应用默认值
+  const defaultOptions: Partial<LlmGenerationOptions> = {
+    timeoutMs: 60000,
+    maxOutputTokens: 8192,
+    temperature: 1.0,
+    topP: 1.0,
+    presencePenalty: 0.0,
+    frequencyPenalty: 0.0,
+    maxToolCalls: 10,
+    think: false, // 默认关闭思考过程的输出
+  };
+  // 2. 创建配置
+  const config = getProviderConfig(provider);
+  const finalConfig: BaseProviderConfig = {
+    ...config, // 基础，包含 apiKey
+    ...defaultOptions, // 应用默认值
+    ...options, // 用户自定义参数覆盖默认值
+  };
 
-  // 3. 调用 Provider 的方法执行核心操作
+  // 3. 创建 VercelAIProvider 实例
+  const vercelAIProvider = new VercelAIProvider(
+    provider,
+    finalConfig.apiKey,
+    finalConfig.proxyUrl
+  );
+
+  // 4. 调用 VercelAIProvider 的方法执行核心操作
   // 如果 stream 选项为 false，则调用非流式方法。
   // 默认（undefined）或 true 时，调用流式方法。
   if (options?.stream === false) {
-    const result: NonStreamingResult = await chatProvider.chatNonStreaming(model, messages);
+    const result = await vercelAIProvider.generateNonStreaming(model, messages, finalConfig);
     console.log(`[handleChat] 成功接收到非流式用量数据:`, result.usage);
-    console.log(`[handleChat] 成功接收到非流式耗时数据:`, result.duration);
 
-    return result;
+    return {
+      content: result.content || '',
+      usage: result.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+      duration: result.duration,
+    };
   } else {
-    // return chatProvider.chatStreaming(model, messages);
     // 1. 返回一个包含了大模型最终结果(ReadableStream)和本次token消耗统计(TokenUsage)的结构体(StreamingResult)
-    const result: StreamingResult = await chatProvider.chatStreaming(model, messages);
+    const result = await vercelAIProvider.generateStreaming(model, messages, finalConfig);
 
-    // 2. 创建一个新的 TransformStream 来处理和转换数据为字节流
+    // 2. 检查返回的是流式结果还是非流式结果
+    if (!('stream' in result)) {
+      // 如果是 LlmProviderResponse，说明没有工具调用，需要转换为流
+      console.log('[handleChat] 接收到非流式响应，转换为流');
+
+      const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
+      const writer = writable.getWriter();
+      const encoder = new TextEncoder();
+
+      (async () => {
+        try {
+          if (result.content) {
+            const textChunk: StreamChunk = { type: 'text', payload: result.content };
+            await writer.write(encoder.encode(toSSE(textChunk)));
+          }
+
+          if (result.usage) {
+            console.log(`[handleChat] 将最终token消耗数据注入 SSE 流中:`, result.usage);
+            const usageChunk: StreamChunk = { type: 'usage', payload: result.usage };
+            await writer.write(encoder.encode(toSSE(usageChunk)));
+          }
+
+          if (result.duration) {
+            console.log(`[handleChat] 将最终耗时数据注入 SSE 流中:`, result.duration);
+            const durationChunk: StreamChunk = { type: 'duration', payload: result.duration };
+            await writer.write(encoder.encode(toSSE(durationChunk)));
+          }
+        } catch (e) {
+          console.error("在 SSE 流转换中发生错误:", e);
+          writer.abort(e);
+        } finally {
+          writer.close();
+        }
+      })();
+
+      return readable;
+    }
+
+    // 3. 如果是流式结果，创建 TransformStream
     const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
-
     const writer = writable.getWriter();
     const reader = result.stream.getReader(); // 这是原始的文本流 reader
     const encoder = new TextEncoder();

@@ -109,6 +109,7 @@ export interface LlmGenerationOptions {
   systemPrompt?: string; // 系统提示词
   maxToolCalls?: number; // 最大工具调用次数
   logPath?: string; // 运行日志存储目录
+  think?: boolean;
 }
 
 /**
