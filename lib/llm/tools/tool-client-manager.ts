@@ -16,16 +16,17 @@ export function getToolClientInstance(serverUrl: string): ToolClient {
   if (!serverUrl) {
     throw new Error('A server URL must be provided to get a ToolClient instance.');
   }
+  const normalizeServerUrl = serverUrl.replace(/\/+$/, '');
 
   // 检查缓存中是否已有实例
-  if (!toolClientInstances.has(serverUrl)) {
-    console.log(`--- [ToolClientManager] Creating new ToolClient instance for: ${serverUrl} ---`);
-    const newInstance = new ToolClient(serverUrl);
-    toolClientInstances.set(serverUrl, newInstance);
+  if (!toolClientInstances.has(normalizeServerUrl)) {
+    console.log(`--- [ToolClientManager] Creating new ToolClient instance for: ${normalizeServerUrl} ---`);
+    const newInstance = new ToolClient(normalizeServerUrl);
+    toolClientInstances.set(normalizeServerUrl, newInstance);
   } else {
-    console.log(`--- [ToolClientManager] Reusing existing ToolClient instance for: ${serverUrl} ---`);
+    console.log(`--- [ToolClientManager] Reusing existing ToolClient instance for: ${normalizeServerUrl} ---`);
   }
 
   // 从 Map 中返回实例（此时必定存在）
-  return toolClientInstances.get(serverUrl)!;
+  return toolClientInstances.get(normalizeServerUrl)!;
 }
