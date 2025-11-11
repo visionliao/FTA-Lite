@@ -10,6 +10,7 @@ import {
 } from 'ai';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOpenAI } from '@ai-sdk/openai';
+import { createAnthropic } from '@ai-sdk/anthropic';
 import { ChatMessage, ToolCall, TokenUsage, DurationUsage, StreamingResult, LlmProviderResponse, BaseProviderConfig } from './types';
 import { McpToolSchema } from './tools/tool-client';
 import { getToolClientInstance } from './tools/tool-client-manager';
@@ -35,9 +36,19 @@ export class VercelAIProvider {
     const providerKey = this.providerName.toLowerCase();
 
     switch (providerKey) {
+      // google gemini
       case 'google':
         return createGoogleGenerativeAI({ apiKey: this.apiKey })(modelName);
 
+      // anthropic
+      case 'anthropic':
+        const anthropicProvider = createAnthropic({
+          apiKey: this.apiKey,
+          baseURL: this.proxyUrl, // 可选,用于代理
+        });
+        return anthropicProvider(modelName);
+
+      // ollama本地模型
       case 'ollama':
         // 使用OpenAI兼容模式访问Ollama
         // 确保使用正确的Ollama OpenAI兼容端点
@@ -54,9 +65,17 @@ export class VercelAIProvider {
           middleware: extractReasoningMiddleware({ tagName: 'think' })
         });
 
-      // 所有兼容 OpenAI 的模型 (包括 openai, deepseek, moonshot, zhipu 等) 都走这里
-      default: 
+      // OpenAI
+      case 'openai':
         return createOpenAI({ baseURL: this.proxyUrl, apiKey: this.apiKey })(modelName);
+
+      // 所有兼容 OpenAI 的其他国产模型 (包括 deepseek, moonshot, zhipu, qwen 等)
+      default:
+        const otherModelProvider = createOpenAI({
+          baseURL: this.proxyUrl,
+          apiKey: this.apiKey,
+        });
+        return otherModelProvider.chat(modelName);
     }
   }
 
