@@ -84,7 +84,6 @@ export async function handleChat(
     presencePenalty: 0.0,
     frequencyPenalty: 0.0,
     maxToolCalls: 10,
-    think: false, // 默认关闭思考过程的输出
   };
   // 2. 创建配置
   const config = getProviderConfig(provider);

@@ -14,6 +14,7 @@ import { createAnthropic } from '@ai-sdk/anthropic';
 import { ChatMessage, ToolCall, TokenUsage, DurationUsage, StreamingResult, LlmProviderResponse, BaseProviderConfig } from './types';
 import { McpToolSchema } from './tools/tool-client';
 import { getToolClientInstance } from './tools/tool-client-manager';
+import { appendToLogFile } from '@/lib/server-utils';
 
 /**
  * 统一的 LLM 提供商，使用 Vercel AI SDK 处理所有模型
@@ -22,6 +23,7 @@ export class VercelAIProvider {
   private providerName: string;
   private apiKey: string;
   private proxyUrl?: string;
+  private logPath?: string;
 
   constructor(providerName: string, apiKey: string, proxyUrl?: string) {
     this.providerName = providerName;
@@ -96,6 +98,10 @@ export class VercelAIProvider {
           const toolStartTime = Date.now();
           console.log(`\n[Tool Execution] 调用工具: ${t.function.name}`);
           console.log(`[Tool Execution] 工具参数:`, JSON.stringify(input, null, 2));
+          if (this.logPath) {
+            const sendMessages = JSON.stringify(input, null, 2);
+            await appendToLogFile(this.logPath, `--- 工具调用 ---\n${sendMessages}\n\n`);
+          }
 
           const toolClient = getToolClientInstance(mcpServerUrl);
           const result = await toolClient.callTool(t.function.name, input);
@@ -103,6 +109,10 @@ export class VercelAIProvider {
           const toolDuration = Date.now() - toolStartTime;
           console.log(`[Tool Execution] 工具返回结果:`, JSON.stringify(result, null, 2));
           console.log(`[Tool Execution] 工具 ${t.function.name} 执行完成，耗时：${toolDuration}ms\n`);
+          if (this.logPath) {
+            const sendMessages = JSON.stringify(result, null, 2);
+            await appendToLogFile(this.logPath, `--- 工具调用结果 ---\n${sendMessages}\n\n`);
+          }
 
           return result;
         },
@@ -142,7 +152,7 @@ export class VercelAIProvider {
   /**
    * 将 Vercel SDK 的结果适配回我们自己的 LlmProviderResponse 格式
    */
-  private adaptVercelResponse(result: any, totalDuration: number): LlmProviderResponse {
+  private async adaptVercelResponse(result: any, totalDuration: number): Promise<LlmProviderResponse> {
     const usage: TokenUsage = {
       prompt_tokens: (result.totalUsage as any)?.inputTokens || 0,
       completion_tokens: (result.totalUsage as any)?.outputTokens || 0,
@@ -167,6 +177,10 @@ export class VercelAIProvider {
     // 推理内容会在 result.reasoning 中
     if (result.reasoning) {
       console.log('[大模型思考内容]:', result.reasoning);
+      if (this.logPath && result.reasoning.length > 10) {
+        const sendMessages = JSON.stringify(result.reasoning, null, 2);
+        await appendToLogFile(this.logPath, `--- 思考过程 ---\n${sendMessages}\n\n`);
+      }
     }
 
     return {
@@ -209,8 +223,8 @@ export class VercelAIProvider {
       frequencyPenalty: options.frequencyPenalty,
       maxTokens: options.maxOutputTokens,
       maxToolCalls: options.maxToolCalls,
-      think: options.think
     };
+    this.logPath = options.logPath;
 
     return sdkParams;
   }
@@ -239,6 +253,10 @@ export class VercelAIProvider {
       console.log('最大工具调用次数：', generateOptions.maxToolCalls)
       console.log('系统提示词：', generateOptions.system || '无')
       console.log('发送给大模型的消息：', generateOptions.messages)
+      if (this.logPath) {
+        const sendMessages = JSON.stringify(generateOptions.messages, null, 2);
+        await appendToLogFile(this.logPath, `--- 发送给大模型的消息 ---\n${sendMessages}\n\n`);
+      }
       // console.log('参数配置信息:', JSON.stringify(generateOptions, null, 2));
       console.log('-----------------------------------------\n');
 
@@ -276,7 +294,7 @@ export class VercelAIProvider {
       const totalDuration = (Date.now() - totalStartTime) * 1e6;
       console.log(`\n总耗时: ${totalDuration}ns`);
 
-      const adaptedResult = this.adaptVercelResponse(result, totalDuration);
+      const adaptedResult = await this.adaptVercelResponse(result, totalDuration);
       console.log('大模型回复:', adaptedResult.content || '无');
       return adaptedResult;
     } finally {
@@ -306,10 +324,19 @@ export class VercelAIProvider {
       console.log('最大工具调用次数：', streamOptions.maxToolCalls)
       console.log('系统提示词：', streamOptions.system || '无')
       console.log('发送给大模型的消息：', streamOptions.messages)
+      if (this.logPath) {
+        const sendMessages = JSON.stringify(streamOptions.messages, null, 2);
+        await appendToLogFile(this.logPath, `--- 发送给大模型的消息 ---\n${sendMessages}\n\n`);
+      }
       // console.log('参数配置信息:', JSON.stringify(streamOptions, null, 2));
       console.log('-----------------------------------------\n');
 
-      const result = await streamText({ model: languageModel, ...streamOptions });
+      const result = await streamText({
+        model: languageModel,
+        ...streamOptions,
+        stopWhen: stepCountIs(streamOptions.maxToolCalls),
+        signal: controller.signal, // 超时控制
+      });
 
       // 使用 Vercel AI SDK v5 的流式 API
       const textPromise = result.text;
