@@ -51,8 +51,8 @@ export async function POST(request: NextRequest): Promise<NextResponse<TestRespo
 
       // 获取检测到的服务器类型
       const detectedServerType = await client.getServerType();
-      const serverType = detectedServerType === 'fastmcp' ? 'FastMCP' :
-                        detectedServerType === 'fastapi' ? 'FastAPI' : 'Unknown';
+      const serverType = detectedServerType === 'fastmcp-sse' || detectedServerType === 'fastmcp-streamablehttp' ? 'FastMCP' :
+                    detectedServerType === 'fastapi' ? 'FastAPI' : 'Unknown';
 
       const result: TestResponse = {
         status: 'ok',

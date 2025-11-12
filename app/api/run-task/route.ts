@@ -4,6 +4,7 @@ import { join } from 'path'
 import { handleChat } from '@/lib/llm/model-service';
 import { ChatMessage, LlmGenerationOptions, NonStreamingResult } from '@/lib/llm/types';
 import { appendToLogFile, ensureLogFileExists } from '@/lib/server-utils';
+import { getDbInstance } from '@/lib/db';
 
 // 安全调用大模型包装器，可以重试
 interface SafeCallResult {
@@ -172,17 +173,17 @@ async function runTask(config: any, baseResultDir: string, onProgress: (data: ob
 
   // 创建基础项目上下文（不包含MCP工具）
   let baseProjectContext = `# 系统提示词\n${config.project.systemPrompt}\n\n`
-  const knowledgeDir = join(process.cwd(), "output", "project", config.project.projectName, "knowledge")
-  try {
-    const knowledgeFiles = await readdir(knowledgeDir)
-    for (const fileName of knowledgeFiles) {
-      const content = await readFile(join(knowledgeDir, fileName), 'utf-8')
-      baseProjectContext += `## 知识库文件: ${fileName}\n${content}\n\n`
-      console.error(`读取知识库文件 ${fileName} 成功， 上下文长度: ${baseProjectContext.length}`);
-    }
-  } catch (e) {
-      onProgress({ type: 'log', message: `警告: 未找到或无法读取知识库目录: ${knowledgeDir}` })
-  }
+  // const knowledgeDir = join(process.cwd(), "output", "project", config.project.projectName, "knowledge")
+  // try {
+  //   const knowledgeFiles = await readdir(knowledgeDir)
+  //   for (const fileName of knowledgeFiles) {
+  //     const content = await readFile(join(knowledgeDir, fileName), 'utf-8')
+  //     baseProjectContext += `## 知识库文件: ${fileName}\n${content}\n\n`
+  //     console.error(`读取知识库文件 ${fileName} 成功， 上下文长度: ${baseProjectContext.length}`);
+  //   }
+  // } catch (e) {
+  //     onProgress({ type: 'log', message: `警告: 未找到或无法读取知识库目录: ${knowledgeDir}` })
+  // }
 
   // 创建用于工作模型的上下文（不包含MCP工具JSON）
   const workContext = baseProjectContext
@@ -236,13 +237,66 @@ async function runTask(config: any, baseResultDir: string, onProgress: (data: ob
         maxToolCalls: 10, // 最大工具调用次数
         logPath: logPath,  // 传递日志输出路径
       };
-      const workMessages: ChatMessage[] = [
+      // RAG - 检索与增强步骤 (START)
+      onProgress({ type: 'log', message: `正在为问题 #${testCase.id} 从向量数据库中检索相关知识...` });
+      let augmentedPrompt: string;
+      let workMessages: ChatMessage[];
+      try {
+        // 1. 监控数据库查询耗时
+        const dbQueryStartTime = performance.now();
+
+        // 2. 获取数据库实例
+        const db = await getDbInstance();
+
+        const topK = 6;
+        // 3. 检索与问题最相关的知识片段 (这里我们取 top 3)
+        const relevantChunks = await db.queryDocuments(testCase.question, topK);
+        const dbQueryEndTime = performance.now(); // 记录结束时间
+        const dbQueryDuration = (dbQueryEndTime - dbQueryStartTime).toFixed(2); // 计算耗时，保留两位小数
+
+        console.log(`\n\n[RAG DEBUG - 问题 #${testCase.id}]`);
+        console.log(`--------------------------------------------------`);
+        console.log(`数据库查询耗时: ${dbQueryDuration} ms`);
+        console.log(`检索到的 Top ${topK} 个原始区块 (relevantChunks):`);
+        // 使用 JSON.stringify 打印完整的对象，格式化输出以便阅读
+        console.log(JSON.stringify(relevantChunks, null, 2));
+
+
+        // 4. 相似度阈值过滤与日志记录
+        const SIMILARITY_THRESHOLD = 0.7;
+        const filteredChunks = relevantChunks.filter(chunk => (chunk.similarity ?? 0) >= SIMILARITY_THRESHOLD);
+        console.log(`相似度阈值过滤后，剩余 ${filteredChunks.length} 个区块。`);
+        console.log(`--------------------------------------------------\n`);
+
+        // 5. 构建用于增强提示词的上下文
+        if (filteredChunks.length > 0) {
+          const context = relevantChunks.map(chunk => `- ${chunk.content}`).join('\n');
+          augmentedPrompt = `
+          ---
+          【知识库知识】
+          ${context}
+          ---
+
+          【用户问题】
+          ${testCase.question}
+          `;
+        } else {
+          augmentedPrompt = testCase.question
+        }
+      } catch (dbError: any) {
+        console.error("[RAG] Database query failed:", dbError);
+        onProgress({ type: 'log', message: `警告: 数据库检索失败，将使用原始问题继续。错误: ${dbError.message}` });
+        // 如果数据库查询失败，我们就回退到原始问题，保证流程不中断
+        augmentedPrompt = testCase.question;
+      }
+      // 5. 使用本地检索知识库后的知识构建发送给模型的消息
+      workMessages = [
         {
           role: 'user',
-          content: testCase.question,
+          content: augmentedPrompt,
         }
       ];
-      // console.log(`工作模型: ${config.models.work}`);
+      // RAG - 检索与增强步骤 (END)
 
       // 检查是否已取消
       if (isCancelled()) {
