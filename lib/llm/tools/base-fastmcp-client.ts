@@ -66,7 +66,8 @@ export abstract class BaseFastMCPClient {
                 }
             }));
 
-            console.log(`--- [${this.getClientType()}] 工具列表结果： ${JSON.stringify(this.toolsCache, null, 2)}`);
+            //console.log(`--- [${this.getClientType()}] 工具列表结果： ${JSON.stringify(this.toolsCache, null, 2)}`);
+            console.log(`--- 工具列表个数： ${this.toolsCache.length}`);
             return this.toolsCache;
         } catch (error) {
             console.error(`[${this.getClientType()}] Failed to get tools schema:`, error);

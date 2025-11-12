@@ -5,6 +5,7 @@ import { handleChat } from '@/lib/llm/model-service';
 import { ChatMessage, LlmGenerationOptions, NonStreamingResult } from '@/lib/llm/types';
 import { appendToLogFile, ensureLogFileExists } from '@/lib/server-utils';
 import { getDbInstance } from '@/lib/db';
+import { rerankDocuments } from "@/lib/reranker/reranker-service";
 
 // 安全调用大模型包装器，可以重试
 interface SafeCallResult {
@@ -248,8 +249,8 @@ async function runTask(config: any, baseResultDir: string, onProgress: (data: ob
         // 2. 获取数据库实例
         const db = await getDbInstance();
 
-        const topK = 6;
-        // 3. 检索与问题最相关的知识片段 (这里我们取 top 3)
+        const topK = 10;
+        // 3. 检索与问题最相关的知识片段(取 top 10)
         const relevantChunks = await db.queryDocuments(testCase.question, topK);
         const dbQueryEndTime = performance.now(); // 记录结束时间
         const dbQueryDuration = (dbQueryEndTime - dbQueryStartTime).toFixed(2); // 计算耗时，保留两位小数
@@ -261,16 +262,41 @@ async function runTask(config: any, baseResultDir: string, onProgress: (data: ob
         // 使用 JSON.stringify 打印完整的对象，格式化输出以便阅读
         console.log(JSON.stringify(relevantChunks, null, 2));
 
+        // 2. 精排 (Rerank) 阶段
+        const rerankStartTime = performance.now();
+        // 将数据库返回的文档转换为 reranker 需要的格式
+        const documentsToRerank = relevantChunks.map((chunk, index) => ({
+          index: index, // 保留原始索引
+          content: chunk.content,
+        }));
+        // 调用 reranker 服务
+        const rerankedResults = await rerankDocuments(testCase.question, documentsToRerank);
+        const rerankEndTime = performance.now();
+        const rerankDuration = (rerankEndTime - rerankStartTime).toFixed(2);
+        onProgress({ type: 'log', message: `重排序完成，耗时 ${rerankDuration} ms。` });
+        console.log(`重排序耗时: ${rerankDuration} ms`);
+        // 3. 使用重排序后的结果
+        console.log("[RAG] Reranked Results:", JSON.stringify(rerankedResults, null, 2));
+        // 从重排序后的结果中，选择我们最终需要的 Top N
+        const topN_rerank = 3;
+        const finalChunks = rerankedResults.slice(0, topN_rerank).map(result => {
+            // 通过原始索引，从 relevantChunks 中找回完整的元数据
+            const originalChunk = relevantChunks[result.index];
+            return {
+                ...originalChunk, // 包含 id, content, metadata
+                similarity: result.score, // 使用 reranker 的分数作为新的、更准确的“相似度”
+            };
+        });
 
         // 4. 相似度阈值过滤与日志记录
-        const SIMILARITY_THRESHOLD = 0.7;
-        const filteredChunks = relevantChunks.filter(chunk => (chunk.similarity ?? 0) >= SIMILARITY_THRESHOLD);
+        const SIMILARITY_THRESHOLD = 0.8;
+        const filteredChunks = finalChunks.filter(chunk => (chunk.similarity ?? 0) >= SIMILARITY_THRESHOLD);
         console.log(`相似度阈值过滤后，剩余 ${filteredChunks.length} 个区块。`);
         console.log(`--------------------------------------------------\n`);
 
         // 5. 构建用于增强提示词的上下文
         if (filteredChunks.length > 0) {
-          const context = relevantChunks.map(chunk => `- ${chunk.content}`).join('\n');
+          const context = filteredChunks.map(chunk => `- ${chunk.content}`).join('\n');
           augmentedPrompt = `
           ---
           【知识库知识】
