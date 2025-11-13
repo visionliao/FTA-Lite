@@ -7,51 +7,10 @@ import pool from './client';
 import { universalChunker } from '../core/chunker';
 import { default as pgvectorCore } from 'pgvector'; // 用于 toSql
 import { default as pgvectorPG } from 'pgvector/pg'; // 用于 registerType
+import { getEmbedding, getModelDimensions } from '../core/embed-config';
 
-// --- 将所有配置和辅助函数集中到这里 ---
-const OLLAMA_API_URL = 'http://localhost:11434/api/embeddings';
-const OLLAMA_MODEL = 'nomic-embed-text:latest';
-const EMBEDDING_DIMENSIONS = 768;
-
-/**
- * 使用 Ollama 生成向量，并根据 nomic-embed-text 的最佳实践添加任务前缀。
- * @param text 要向量化的文本
- * @param task 'search_query' | 'search_document' - 明确指定任务类型
- * @returns 向量数组
- */
-async function getOllamaEmbedding(
-  text: string,
-  task: 'search_query' | 'search_document'
-): Promise<number[]> {
-
-  // 根据任务类型，为 prompt 添加官方推荐的前缀
-  const prefixedText = `${task}: ${text}`;
-
-  const response = await fetch(OLLAMA_API_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    // 使用添加了前缀的文本
-    body: JSON.stringify({ model: OLLAMA_MODEL, prompt: prefixedText }),
-  });
-
-  if (!response.ok) throw new Error(`Ollama API request failed: ${response.statusText}`);
-  const data = await response.json() as { embedding: number[] };
-  return data.embedding;
-}
-
-// 简单的按照2000个字符为一个块的切分策略(效果很差)
-function chunkText(text: string, chunkSize = 2000, overlap = 400): string[] {
-    const chunks: string[] = [];
-    let i = 0;
-    while (i < text.length) {
-      const end = Math.min(i + chunkSize, text.length);
-      chunks.push(text.slice(i, end));
-      i += chunkSize - overlap;
-      if (end === text.length) break;
-    }
-    return chunks;
-}
-
+// 模型向量维度
+const EMBEDDING_DIMENSIONS = getModelDimensions();
 
 export class PostgresDB implements DataAccess {
   private pool: Pool = pool;
@@ -76,9 +35,17 @@ export class PostgresDB implements DataAccess {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
+
+      // 在创建前先彻底删除旧表，以确保向量维度发生变化(表结构变化)导致的失败
+      // 使用 CASCADE 会自动删除依赖于这些表的其他对象（如 knowledge_chunks 的外键）
+      console.log('Dropping old knowledge base tables to ensure a clean slate...');
+      await client.query('DROP TABLE IF EXISTS knowledge_files CASCADE;');
+      await client.query('DROP TABLE IF EXISTS knowledge_chunks CASCADE;');
+      console.log('Old tables dropped successfully.');
+
       await client.query('CREATE EXTENSION IF NOT EXISTS vector;');
       await pgvectorPG.registerType(client);
-      
+
       await client.query(`
         CREATE TABLE IF NOT EXISTS knowledge_files (
           id SERIAL PRIMARY KEY,
@@ -95,11 +62,38 @@ export class PostgresDB implements DataAccess {
           embedding VECTOR(${EMBEDDING_DIMENSIONS})
         );
       `);
-      await client.query(`
-        CREATE INDEX IF NOT EXISTS idx_embedding_cos 
-        ON knowledge_chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
-      `);
-      
+      if (EMBEDDING_DIMENSIONS <= 2000) {
+        // ivfflat 是一种非常高效的索引，硬性限制：它不支持维度超过 2000 的向量。
+        // IVFFlat 的优势:
+        // 构建速度快 - 索引构建时间比 HNSW 短
+        // 内存占用小 - 相比 HNSW 占用更少的内存
+        // 适合超大规模数据 - 在千万级以上的数据量时,IVFFlat 的性能优势更明显
+
+        // await client.query(`
+        //   CREATE INDEX IF NOT EXISTS idx_embedding_cos
+        //   ON knowledge_chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+        // `);
+
+        // 创建 HNSW 索引，HNSW 通常在准确率和查询速度之间能提供更好的平衡，尤其是在中等规模的数据集上。
+        // 硬性限制：它不支持维度超过 2000 的向量。
+        // HNSW 的优势:
+        // 1. 查询准确率更高 - HNSW 是一种图结构索引,能提供接近精确搜索的结果
+        // 2. 查询速度稳定 - 不需要像 IVFFlat 那样先聚类再搜索,查询延迟更可预测
+        // 3. 无需调参 - 开箱即用,不需要像 IVFFlat 那样调整 lists 参数
+        // 4. 适合中小规模数据 - 在几十万到百万级别的向量数据上表现优异
+        console.log(`Vector dimension (${EMBEDDING_DIMENSIONS}) is within the index limit. Creating HNSW index...`);
+        await client.query(`
+          CREATE INDEX ON knowledge_chunks USING hnsw (embedding vector_cosine_ops);
+        `);
+      } else {
+        // 当维度超过2000时，打印警告并跳过索引创建
+        console.warn('\n--------------------------------------------------------------------');
+        console.warn(`[INDEX WARNING] Vector dimension (${EMBEDDING_DIMENSIONS}) exceeds the 2000 limit of the current environment's pgvector index implementation.`);
+        console.warn('Skipping index creation to prevent migration failure.');
+        console.warn('Vector search will perform an exact, unindexed scan, which may be slow on large datasets.');
+        console.warn('--------------------------------------------------------------------\n');
+      }
+
       await client.query('COMMIT');
       console.log('--- Migrations completed successfully ---');
     } catch (error) {
@@ -135,7 +129,7 @@ export class PostgresDB implements DataAccess {
         console.log(`  - Split ${fileName} into ${chunks.length} high-quality chunks.`);
 
         for (const chunk of chunks) {
-          const embedding = await getOllamaEmbedding(chunk, 'search_document');
+          const embedding = await getEmbedding(chunk, 'search_document');
           await client.query(
             'INSERT INTO knowledge_chunks (file_id, chunk_text, embedding) VALUES ($1, $2, $3)',
             [fileId, chunk, pgvectorCore.toSql(embedding)]
@@ -162,7 +156,7 @@ export class PostgresDB implements DataAccess {
   async queryDocuments(query: string, topK: number): Promise<Document[]> {
     console.log(`Querying PostgreSQL with vector search for: "${query}"`);
     try {
-      const queryEmbedding = await getOllamaEmbedding(query, 'search_query');
+      const queryEmbedding = await getEmbedding(query, 'search_query');
       // const queryVector = JSON.stringify(queryEmbedding);
 
       // 使用 <=> 操作符进行余弦距离搜索
