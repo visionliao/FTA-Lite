@@ -35,7 +35,7 @@ export function getModelDimensions(): number {
     // 检查环境变量是否已设置且不为空字符串
     if (EMBEDDING_DIMENSIONS && EMBEDDING_DIMENSIONS.trim() !== '') {
         const parsedDim = parseInt(EMBEDDING_DIMENSIONS, 10);
-        
+
         // 检查解析后的值是否是有效数字
         if (!isNaN(parsedDim)) {
             return parsedDim; // 配置有效，直接返回
@@ -53,7 +53,7 @@ export function getModelDimensions(): number {
     console.warn(`Falling back to default dimension: ${defaultValue}.`);
     console.warn(`PLEASE ENSURE this matches the output of your model ('${OLLAMA_MODEL}') to avoid errors during data seeding.`);
     console.warn('--------------------------------------------------------------------');
-    
+
     return defaultValue;
 }
 
@@ -67,7 +67,7 @@ export async function getEmbedding(
   text: string,
   task: 'search_query' | 'search_document'
 ): Promise<number[]> {
-  
+
   let processedText = text;
 
   // nomic-embed-text 这个模型为了在检索任务中达到最佳效果，其开发者建议在生成向量时，
@@ -89,7 +89,7 @@ export async function getEmbedding(
     console.error(`Ollama API request failed: ${response.status} ${response.statusText}`, errorBody);
     throw new Error(`Ollama API request failed: ${response.statusText}`);
   }
-  
+
   const data = await response.json() as { embedding: number[] };
   return data.embedding;
 }
