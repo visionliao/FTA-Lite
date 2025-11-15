@@ -217,6 +217,11 @@ async function runTask(config: any, baseResultDir: string, onProgress: (data: ob
       let workDurationUsage = 0; // 工作模型耗时
       let scoreTokenUsage = 0; // 评分模型token消耗
       let scoreDurationUsage = 0; // 评分模型耗时
+      let dbQueryDuration = 0; // 查询向量数据库耗时
+      let rerankDuration = 0;  // 重排序耗时
+      let databaseName;    // 数据库名称
+      let embeddingModelName;  // 向量模型名称
+      let rerankModelName;  // 重排序模型名称
       currentTask++;
       onProgress({ type: 'update', payload: { activeTaskMessage: `正在回答问题 ${testCase.id}...`, progress: (currentTask / totalTasks) * 100, currentTask: currentTask } })
 
@@ -253,6 +258,8 @@ async function runTask(config: any, baseResultDir: string, onProgress: (data: ob
         if (!databaseType) {
           throw new Error("Database type must be configured in project settings or DATABASE_TYPE environment variable.");
         }
+        databaseName = databaseType;
+        embeddingModelName = embeddingModel;
 
         console.log(`[RAG] Creating database instance with type: ${databaseType}, embedding model: ${embeddingModel || 'default'}`);
         const db = await getDbInstance(databaseType, embeddingModel);
@@ -261,7 +268,7 @@ async function runTask(config: any, baseResultDir: string, onProgress: (data: ob
         // 3. 检索与问题最相关的知识片段(取 top 10)
         const relevantChunks = await db.queryDocuments(testCase.question, topK);
         const dbQueryEndTime = performance.now(); // 记录结束时间
-        const dbQueryDuration = (dbQueryEndTime - dbQueryStartTime).toFixed(2); // 计算耗时，保留两位小数
+        dbQueryDuration = (dbQueryEndTime - dbQueryStartTime);
 
         console.log(`\n\n[RAG DEBUG - 问题 #${testCase.id}]`);
         console.log(`--------------------------------------------------`);
@@ -270,7 +277,7 @@ async function runTask(config: any, baseResultDir: string, onProgress: (data: ob
         // 使用 JSON.stringify 打印完整的对象，格式化输出以便阅读
         console.log(JSON.stringify(relevantChunks, null, 2));
 
-        // 2. 精排 (Rerank) 阶段
+        // 3. 精排 (Rerank) 阶段
         const rerankStartTime = performance.now();
         // 将数据库返回的文档转换为 reranker 需要的格式
         const documentsToRerank = relevantChunks.map((chunk, index) => ({
@@ -279,12 +286,14 @@ async function runTask(config: any, baseResultDir: string, onProgress: (data: ob
         }));
         // 调用 reranker 服务，使用项目配置的重排序模型
         const rerankerModel = config.project.rerankerModel || 'BAAI/bge-reranker-v2-m3'; // 默认模型
+        rerankModelName = rerankerModel;
         const rerankedResults = await rerankDocuments(testCase.question, documentsToRerank, rerankerModel);
         const rerankEndTime = performance.now();
-        const rerankDuration = (rerankEndTime - rerankStartTime).toFixed(2);
+        rerankDuration = (rerankEndTime - rerankStartTime);
         onProgress({ type: 'log', message: `重排序完成，耗时 ${rerankDuration} ms。` });
         console.log(`重排序耗时: ${rerankDuration} ms`);
-        // 3. 使用重排序后的结果
+
+        // 4. 使用重排序后的结果
         console.log("[RAG] Reranked Results:", JSON.stringify(rerankedResults, null, 2));
         // 从重排序后的结果中，选择我们最终需要的 Top N
         const topN_rerank = 3;
@@ -297,13 +306,13 @@ async function runTask(config: any, baseResultDir: string, onProgress: (data: ob
             };
         });
 
-        // 4. 相似度阈值过滤与日志记录
+        // 5. 相似度阈值过滤与日志记录
         const SIMILARITY_THRESHOLD = 0.8;
         const filteredChunks = finalChunks.filter(chunk => (chunk.similarity ?? 0) >= SIMILARITY_THRESHOLD);
         console.log(`相似度阈值过滤后，剩余 ${filteredChunks.length} 个区块。`);
         console.log(`--------------------------------------------------\n`);
 
-        // 5. 构建用于增强提示词的上下文
+        // 6. 构建用于增强提示词的上下文
         if (filteredChunks.length > 0) {
           const context = filteredChunks.map(chunk => `- ${chunk.content}`).join('\n');
           augmentedPrompt = `
@@ -324,7 +333,7 @@ async function runTask(config: any, baseResultDir: string, onProgress: (data: ob
         // 如果数据库查询失败，我们就回退到原始问题，保证流程不中断
         augmentedPrompt = testCase.question;
       }
-      // 5. 使用本地检索知识库后的知识构建发送给模型的消息
+      // 7. 使用本地检索知识库后的知识构建发送给模型的消息
       workMessages = [
         {
           role: 'user',
@@ -463,6 +472,11 @@ async function runTask(config: any, baseResultDir: string, onProgress: (data: ob
         workDurationUsage: workDurationUsage,
         scoreTokenUsage: scoreTokenUsage,
         scoreDurationUsage: scoreDurationUsage,
+        dbQueryDuration: dbQueryDuration,
+        rerankDuration: rerankDuration,
+        databaseName: databaseName,
+        embeddingModelName: embeddingModelName,
+        rerankModelName: rerankModelName,
         error: workResult.error
       };
       qaResults.push(resultEntry);

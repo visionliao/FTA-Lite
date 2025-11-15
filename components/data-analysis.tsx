@@ -19,12 +19,19 @@ interface QuestionResult {
   workDurationUsage: number
   scoreTokenUsage: number
   scoreDurationUsage: number
+  dbQueryDuration?: number // 查询向量数据库耗时
+  rerankDuration?: number // 重排序耗时
+  databaseName?: string // 数据库名称
+  embeddingModelName?: string // 嵌入模型名称
+  rerankModelName?: string // 重排序模型名称
   loop?: string // 新增字段，用于标识来自哪个轮次
   // 全部选项时使用的字段（所有轮次的总和）
   totalWorkTokenUsage?: number
   totalWorkDurationUsage?: number
   totalScoreTokenUsage?: number
   totalScoreDurationUsage?: number
+  totalDbQueryDuration?: number // 所有轮次的查询数据库耗时总和
+  totalRerankDuration?: number // 所有轮次的重排序耗时总和
   // 全部选项时使用的字段（得分计算）
   totalActualScore?: number // 所有轮次该问题的实际得分之和
   totalMaxScore?: number // 所有轮次该问题的分数之和
@@ -38,6 +45,8 @@ interface LoopResult {
   maxPossibleScore: number // 问题总分（所有问题的maxScore相加）
   totalTokenUsage: number
   averageDuration: number
+  averageDbQueryDuration?: number // 查询向量数据库平均耗时
+  averageRerankDuration?: number // 重排序平均耗时
 }
 
 export function DataAnalysis() {
@@ -51,6 +60,8 @@ export function DataAnalysis() {
     totalTokenUsage: number
     averageDuration: number
     totalQuestions: number
+    averageDbQueryDuration?: number
+    averageRerankDuration?: number
   } | null>(null)
 
   // 截图相关状态
@@ -141,6 +152,8 @@ export function DataAnalysis() {
         let averageScore: number
         let totalTokenUsage: number
         let averageDuration: number
+        let averageDbQueryDuration: number
+        let averageRerankDuration: number
 
         if (data.isAllLoops) {
           // 处理全部轮次的数据
@@ -170,6 +183,8 @@ export function DataAnalysis() {
             const totalWorkDurationUsage = questionResults.reduce((sum, r) => sum + r.workDurationUsage, 0)
             const totalScoreTokenUsage = questionResults.reduce((sum, r) => sum + r.scoreTokenUsage, 0)
             const totalScoreDurationUsage = questionResults.reduce((sum, r) => sum + r.scoreDurationUsage, 0)
+            const totalDbQueryDuration = questionResults.reduce((sum, r) => sum + (r.dbQueryDuration || 0), 0)
+            const totalRerankDuration = questionResults.reduce((sum, r) => sum + (r.rerankDuration || 0), 0)
 
             // 计算得分情况（所有轮次）
             const totalActualScore = questionResults.reduce((sum, r) => sum + r.score, 0)
@@ -183,6 +198,8 @@ export function DataAnalysis() {
               totalWorkDurationUsage, // 所有轮次的问答耗时总和
               totalScoreTokenUsage, // 所有轮次的评分消耗token总和
               totalScoreDurationUsage, // 所有轮次的评分耗时总和
+              totalDbQueryDuration, // 所有轮次的查询数据库耗时总和
+              totalRerankDuration, // 所有轮次的重排序耗时总和
               totalActualScore, // 所有轮次该问题的实际得分之和
               totalMaxScore // 所有轮次该问题的分数之和
             })
@@ -194,6 +211,8 @@ export function DataAnalysis() {
           averageScore = totalScore / data.results.length
           totalTokenUsage = data.results.reduce((sum: number, r: QuestionResult) => sum + r.workTokenUsage + r.scoreTokenUsage, 0)
           averageDuration = data.results.reduce((sum: number, r: QuestionResult) => sum + r.workDurationUsage + r.scoreDurationUsage, 0) / data.results.length
+          averageDbQueryDuration = data.results.reduce((sum: number, r: QuestionResult) => sum + (r.dbQueryDuration || 0), 0) / data.results.length
+          averageRerankDuration = data.results.reduce((sum: number, r: QuestionResult) => sum + (r.rerankDuration || 0), 0) / data.results.length
         } else {
           // 处理单个轮次的数据（保持原有逻辑）
           processedResults = data.results
@@ -202,6 +221,8 @@ export function DataAnalysis() {
           averageScore = totalScore / processedResults.length
           totalTokenUsage = processedResults.reduce((sum: number, r: QuestionResult) => sum + r.workTokenUsage + r.scoreTokenUsage, 0)
           averageDuration = processedResults.reduce((sum: number, r: QuestionResult) => sum + r.workDurationUsage + r.scoreDurationUsage, 0) / processedResults.length
+          averageDbQueryDuration = processedResults.reduce((sum: number, r: QuestionResult) => sum + (r.dbQueryDuration || 0), 0) / processedResults.length
+          averageRerankDuration = processedResults.reduce((sum: number, r: QuestionResult) => sum + (r.rerankDuration || 0), 0) / processedResults.length
         }
 
         setLoopResults({
@@ -211,13 +232,17 @@ export function DataAnalysis() {
           totalScore,
           maxPossibleScore,
           totalTokenUsage,
-          averageDuration
+          averageDuration,
+          averageDbQueryDuration,
+          averageRerankDuration
         })
 
         setSummaryStats({
           averageScore,
           totalTokenUsage,
           averageDuration,
+          averageDbQueryDuration,
+          averageRerankDuration,
           totalQuestions: processedResults.length
         })
       }
@@ -266,6 +291,10 @@ export function DataAnalysis() {
 
   const formatDuration = (ms: number) => {
     return `${(ms / 1000).toFixed(2)}s`
+  }
+
+  const formatDurationMs = (ms: number) => {
+    return `${ms.toFixed(2)}ms`
   }
 
   const formatToken = (token: number) => {
@@ -343,7 +372,7 @@ export function DataAnalysis() {
             {/* 最后一行：总体统计 */}
             {loopResults && (
               <div className="border-b pb-4 mb-4">
-                <div className="grid grid-cols-1 md:grid-cols-5 gap-4 text-sm bg-muted/30 p-4 rounded-lg">
+                <div className="grid grid-cols-1 md:grid-cols-7 gap-4 text-sm bg-muted/30 p-4 rounded-lg">
                   <div className="text-center">
                     <p className="font-medium text-muted-foreground">问题总分</p>
                     <p className="text-lg font-bold text-blue-600">{loopResults.maxPossibleScore}</p>
@@ -359,6 +388,27 @@ export function DataAnalysis() {
                   <div className="text-center">
                     <p className="font-medium text-muted-foreground">总token消耗</p>
                     <p className="text-lg font-bold text-green-600">{formatToken(loopResults.totalTokenUsage)}</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="font-medium text-muted-foreground">查询平均耗时</p>
+                    <p className="text-lg font-bold text-orange-600">
+                      {formatDurationMs(loopResults.averageDbQueryDuration || 0)}
+                    </p>
+                    <p className="text-xs text-orange-500 mt-1">
+                      {loopResults.results[0]?.databaseName || "N/A"}
+                    </p>
+                    <p className="text-xs text-orange-500 truncate max-w-full" title={loopResults.results[0]?.embeddingModelName}>
+                      {loopResults.results[0]?.embeddingModelName || "N/A"}
+                    </p>
+                  </div>
+                  <div className="text-center">
+                    <p className="font-medium text-muted-foreground">重排序平均耗时</p>
+                    <p className="text-lg font-bold text-pink-600">
+                      {formatDurationMs(loopResults.averageRerankDuration || 0)}
+                    </p>
+                    <p className="text-xs text-pink-500 mt-1 truncate max-w-full" title={loopResults.results[0]?.rerankModelName}>
+                      {loopResults.results[0]?.rerankModelName || "N/A"}
+                    </p>
                   </div>
                   <div className="text-center">
                     <p className="font-medium text-muted-foreground">总共耗时</p>
@@ -468,6 +518,36 @@ export function DataAnalysis() {
                       )}
                     </span>
                   </div>
+                  {(result.dbQueryDuration !== undefined || result.totalDbQueryDuration !== undefined) && (
+                    <div className="bg-amber-50 px-3 py-1 rounded">
+                      <span className="text-xs text-amber-600 font-medium">查询耗时：</span>
+                      <span className="text-sm ml-1">
+                        {formatDurationMs(
+                          selectedLoop === 'all'
+                            ? result.totalDbQueryDuration || 0
+                            : result.dbQueryDuration || 0
+                        )}
+                        {selectedLoop === 'all' && (
+                          <span className="text-xs text-gray-500 ml-1">(累计)</span>
+                        )}
+                      </span>
+                    </div>
+                  )}
+                  {(result.rerankDuration !== undefined || result.totalRerankDuration !== undefined) && (
+                    <div className="bg-rose-50 px-3 py-1 rounded">
+                      <span className="text-xs text-rose-600 font-medium">重排序耗时：</span>
+                      <span className="text-sm ml-1">
+                        {formatDurationMs(
+                          selectedLoop === 'all'
+                            ? result.totalRerankDuration || 0
+                            : result.rerankDuration || 0
+                        )}
+                        {selectedLoop === 'all' && (
+                          <span className="text-xs text-gray-500 ml-1">(累计)</span>
+                        )}
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
