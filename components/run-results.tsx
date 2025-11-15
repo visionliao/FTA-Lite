@@ -307,7 +307,7 @@ export function RunResults() {
             <p className="text-sm text-muted-foreground mt-1">各面板的配置信息</p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
             <div>
               <div className="font-medium text-foreground mb-1">项目概况</div>
               <div className="text-muted-foreground">
@@ -318,6 +318,19 @@ export function RunResults() {
               </div>
               <div className="text-muted-foreground">
                 MCP工具: {(projectConfig.mcpTools || []).length} 个
+              </div>
+            </div>
+
+            <div>
+              <div className="font-medium text-foreground mb-1">向量模型配置</div>
+              <div className="text-muted-foreground">
+                数据库: {projectConfig.databaseType || "未设置"}
+              </div>
+              <div className="text-muted-foreground">
+                向量模型: {projectConfig.embeddingModel || "未设置"}
+              </div>
+              <div className="text-muted-foreground">
+                重排序模型: {projectConfig.rerankerModel || "未设置"}
               </div>
             </div>
 
