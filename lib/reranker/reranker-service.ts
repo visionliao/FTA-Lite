@@ -28,15 +28,25 @@ export interface RerankResult {
 export async function rerankDocuments(
   query: string,
   documents: RerankInput[],
+  modelName: string,
 ): Promise<RerankResult[]> {
   if (!documents || documents.length === 0) {
     return [];
   }
 
-  // 从导入的配置中获取模型名称
-  const { modelName } = RERANKER_CONFIG;
+  let rerankModelName = modelName;
+  // 验证模型名称是否提供
+  if (!rerankModelName) {
+    // 如果从前端用户界面传递的重排序模型名称为空，则尝试从配置文件中获取模型名称
+    const { modelName } = RERANKER_CONFIG;
+    rerankModelName = modelName;
 
-  console.log(`[Reranker] 正在使用模型 ${modelName} 调用通用重排序服务处理 ${documents.length} 个文档`);
+    if (!rerankModelName) {
+      throw new Error('重排序模型名称不能为空');
+    }
+  }
+
+  console.log(`[Reranker] 正在使用模型 ${rerankModelName} 调用通用重排序服务处理 ${documents.length} 个文档`);
 
   try {
     const response = await fetch(RERANK_API_URL, {
@@ -46,7 +56,7 @@ export async function rerankDocuments(
       },
       // 请求体现在包含了模型名称和完整的文档对象
       body: JSON.stringify({
-        model: modelName,
+        model: rerankModelName,
         query: query,
         documents: documents,
       }),

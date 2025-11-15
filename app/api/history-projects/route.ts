@@ -75,7 +75,10 @@ async function getProjectData(projectName: string) {
         description: string
         returnValue: string
       }>,
-      mcpToolsCode: ""
+      mcpToolsCode: "",
+      databaseType: "",
+      embeddingModel: "",
+      rerankerModel: ""
     }
 
     try {
@@ -141,6 +144,28 @@ async function getProjectData(projectName: string) {
         }
       } catch (error) {
         console.error("Error parsing MCP server address:", error)
+      }
+
+      // 提取向量数据库和模型配置
+      try {
+        const configMatch = projectContent.match(/## 向量数据库和模型配置\s*\n([\s\S]*?)(?=\n## |\n#|$)/)
+        if (configMatch) {
+          const configText = configMatch[1].trim()
+          const lines = configText.split('\n')
+
+          for (const line of lines) {
+            const trimmedLine = line.trim()
+            if (trimmedLine.startsWith('- 向量数据库类型:')) {
+              projectData.databaseType = trimmedLine.replace('- 向量数据库类型:', '').trim()
+            } else if (trimmedLine.startsWith('- 向量嵌入模型:')) {
+              projectData.embeddingModel = trimmedLine.replace('- 向量嵌入模型:', '').trim()
+            } else if (trimmedLine.startsWith('- 重排序模型:')) {
+              projectData.rerankerModel = trimmedLine.replace('- 重排序模型:', '').trim()
+            }
+          }
+        }
+      } catch (error) {
+        console.error("Error parsing database and model configuration:", error)
       }
     } catch (error) {
       console.error("Error reading project file:", error)

@@ -81,6 +81,10 @@ interface AppState {
     showSuccess: boolean
     showProjectExistsDialog: boolean
     existingProjectName: string
+    // 向量数据库和模型配置
+    databaseType: string
+    embeddingModel: string
+    rerankerModel: string
   }
 
   // 模型设置状态
@@ -131,6 +135,9 @@ interface AppState {
   setShowSuccess: (show: boolean) => void
   setShowProjectExistsDialog: (show: boolean) => void
   setExistingProjectName: (name: string) => void
+  setDatabaseType: (type: string) => void
+  setEmbeddingModel: (model: string) => void
+  setRerankerModel: (model: string) => void
 
   // Model Settings Actions
   updateModelSettingsConfig: (config: Partial<AppState['modelSettingsConfig']>) => void
@@ -199,7 +206,11 @@ export const useAppStore = create<AppState>()(
         isEditMode: true,
         showSuccess: false,
         showProjectExistsDialog: false,
-        existingProjectName: ""
+        existingProjectName: "",
+        // 向量数据库和模型配置默认值
+        databaseType: "POSTGRES",
+        embeddingModel: "nomic-embed-text:latest",
+        rerankerModel: "BAAI/bge-reranker-v2-m3"
       },
 
       // 模型设置默认值
@@ -283,6 +294,16 @@ export const useAppStore = create<AppState>()(
 
       setExistingProjectName: (name) => 
         get().updateProjectConfig({ existingProjectName: name }),
+
+      // Database and Model Configuration Actions
+      setDatabaseType: (type: string) =>
+        get().updateProjectConfig({ databaseType: type }),
+
+      setEmbeddingModel: (model: string) =>
+        get().updateProjectConfig({ embeddingModel: model }),
+
+      setRerankerModel: (model: string) =>
+        get().updateProjectConfig({ rerankerModel: model }),
 
       // Model Settings Actions
       updateModelSettingsConfig: (config) => 
@@ -392,6 +413,9 @@ export const useAppStore = create<AppState>()(
           knowledgeBaseFiles: state.projectConfig.knowledgeBaseFiles,
           mcpTools: state.projectConfig.mcpTools,
           mcpToolsCode: state.projectConfig.mcpToolsCode,
+          databaseType: state.projectConfig.databaseType,
+          embeddingModel: state.projectConfig.embeddingModel,
+          rerankerModel: state.projectConfig.rerankerModel,
         },
         modelSettingsConfig: {
           workModel: state.modelSettingsConfig.workModel,

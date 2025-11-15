@@ -10,7 +10,8 @@
     "db:create": "tsx scripts/create-db.ts",
     "db:migrate": "tsx scripts/migrate.ts",
     "db:seed": "tsx scripts/seed.ts",
-    "db:debug": "tsx debug_embeddings.ts"
+    "db:debug": "tsx debug_embeddings.ts",
+    "db:inspect-chroma": "tsx --env-file .env scripts/inspect-chroma.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^2.0.44",

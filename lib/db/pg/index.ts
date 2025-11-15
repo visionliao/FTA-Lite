@@ -9,11 +9,16 @@ import { default as pgvectorCore } from 'pgvector'; // 用于 toSql
 import { default as pgvectorPG } from 'pgvector/pg'; // 用于 registerType
 import { getEmbedding, getModelDimensions } from '../core/embed-config';
 
-// 模型向量维度
-const EMBEDDING_DIMENSIONS = getModelDimensions();
-
 export class PostgresDB implements DataAccess {
   private pool: Pool = pool;
+  private embeddingModel: string;
+  private embeddingDimensions: number;
+
+  constructor(embeddingModel?: string) {
+    this.embeddingModel = embeddingModel || process.env.EMBEDDING_MODEL_TYPE!;
+    this.embeddingDimensions = getModelDimensions(this.embeddingModel);
+    console.log(`PostgresDB instance created for embedding model: ${this.embeddingModel} (${this.embeddingDimensions} dimensions)`);
+  }
 
   async init(): Promise<void> {
     try {
@@ -59,10 +64,10 @@ export class PostgresDB implements DataAccess {
           id SERIAL PRIMARY KEY,
           file_id INTEGER NOT NULL REFERENCES knowledge_files(id) ON DELETE CASCADE,
           chunk_text TEXT NOT NULL,
-          embedding VECTOR(${EMBEDDING_DIMENSIONS})
+          embedding VECTOR(${this.embeddingDimensions})
         );
       `);
-      if (EMBEDDING_DIMENSIONS <= 2000) {
+      if (this.embeddingDimensions <= 2000) {
         // ivfflat 是一种非常高效的索引，硬性限制：它不支持维度超过 2000 的向量。
         // IVFFlat 的优势:
         // 构建速度快 - 索引构建时间比 HNSW 短
@@ -81,14 +86,14 @@ export class PostgresDB implements DataAccess {
         // 2. 查询速度稳定 - 不需要像 IVFFlat 那样先聚类再搜索,查询延迟更可预测
         // 3. 无需调参 - 开箱即用,不需要像 IVFFlat 那样调整 lists 参数
         // 4. 适合中小规模数据 - 在几十万到百万级别的向量数据上表现优异
-        console.log(`Vector dimension (${EMBEDDING_DIMENSIONS}) is within the index limit. Creating HNSW index...`);
+        console.log(`Vector dimension (${this.embeddingDimensions}) is within the index limit. Creating HNSW index...`);
         await client.query(`
           CREATE INDEX ON knowledge_chunks USING hnsw (embedding vector_cosine_ops);
         `);
       } else {
         // 当维度超过2000时，打印警告并跳过索引创建
         console.warn('\n--------------------------------------------------------------------');
-        console.warn(`[INDEX WARNING] Vector dimension (${EMBEDDING_DIMENSIONS}) exceeds the 2000 limit of the current environment's pgvector index implementation.`);
+        console.warn(`[INDEX WARNING] Vector dimension (${this.embeddingDimensions}) exceeds the 2000 limit of the current environment's pgvector index implementation.`);
         console.warn('Skipping index creation to prevent migration failure.');
         console.warn('Vector search will perform an exact, unindexed scan, which may be slow on large datasets.');
         console.warn('--------------------------------------------------------------------\n');
@@ -129,7 +134,7 @@ export class PostgresDB implements DataAccess {
         console.log(`  - Split ${fileName} into ${chunks.length} high-quality chunks.`);
 
         for (const chunk of chunks) {
-          const embedding = await getEmbedding(chunk, 'search_document');
+          const embedding = await getEmbedding(chunk, 'search_document', this.embeddingModel);
           await client.query(
             'INSERT INTO knowledge_chunks (file_id, chunk_text, embedding) VALUES ($1, $2, $3)',
             [fileId, chunk, pgvectorCore.toSql(embedding)]
@@ -156,7 +161,7 @@ export class PostgresDB implements DataAccess {
   async queryDocuments(query: string, topK: number): Promise<Document[]> {
     console.log(`Querying PostgreSQL with vector search for: "${query}"`);
     try {
-      const queryEmbedding = await getEmbedding(query, 'search_query');
+      const queryEmbedding = await getEmbedding(query, 'search_query', this.embeddingModel);
       // const queryVector = JSON.stringify(queryEmbedding);
 
       // 使用 <=> 操作符进行余弦距离搜索

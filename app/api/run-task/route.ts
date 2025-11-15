@@ -246,8 +246,16 @@ async function runTask(config: any, baseResultDir: string, onProgress: (data: ob
         // 1. 监控数据库查询耗时
         const dbQueryStartTime = performance.now();
 
-        // 2. 获取数据库实例
-        const db = await getDbInstance();
+        // 2. 获取数据库实例，使用用户配置的数据库类型和嵌入模型
+        const databaseType = config.project.databaseType || process.env.DATABASE_TYPE;
+        const embeddingModel = config.project.embeddingModel;
+
+        if (!databaseType) {
+          throw new Error("Database type must be configured in project settings or DATABASE_TYPE environment variable.");
+        }
+
+        console.log(`[RAG] Creating database instance with type: ${databaseType}, embedding model: ${embeddingModel || 'default'}`);
+        const db = await getDbInstance(databaseType, embeddingModel);
 
         const topK = 10;
         // 3. 检索与问题最相关的知识片段(取 top 10)
@@ -269,8 +277,9 @@ async function runTask(config: any, baseResultDir: string, onProgress: (data: ob
           index: index, // 保留原始索引
           content: chunk.content,
         }));
-        // 调用 reranker 服务
-        const rerankedResults = await rerankDocuments(testCase.question, documentsToRerank);
+        // 调用 reranker 服务，使用项目配置的重排序模型
+        const rerankerModel = config.project.rerankerModel || 'BAAI/bge-reranker-v2-m3'; // 默认模型
+        const rerankedResults = await rerankDocuments(testCase.question, documentsToRerank, rerankerModel);
         const rerankEndTime = performance.now();
         const rerankDuration = (rerankEndTime - rerankStartTime).toFixed(2);
         onProgress({ type: 'log', message: `重排序完成，耗时 ${rerankDuration} ms。` });

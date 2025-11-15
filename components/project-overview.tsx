@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { FolderOpen, FileText, Upload, Trash2, Loader2, Save, Edit, AlertTriangle } from "lucide-react"
+import { FolderOpen, FileText, Upload, Trash2, Loader2, Save, Edit, AlertTriangle, RefreshCw } from "lucide-react"
 
 // 自动调整textarea高度的组件
 const AutoResizeTextarea = ({
@@ -71,6 +71,24 @@ const AutoResizeTextarea = ({
   )
 }
 
+// 为模型定义清晰的类型
+interface EmbeddingModel {
+  name: string;
+  dimensions: number;
+}
+
+interface RerankerModel {
+  name: string;
+  description: string;
+}
+
+// 为整个配置对象定义类型
+interface ConfigOptions {
+  databaseTypes: string[];
+  embeddingModels: EmbeddingModel[];
+  rerankerModels: RerankerModel[];
+}
+
 export function ProjectOverview() {
   const {
     projectConfig: {
@@ -88,7 +106,10 @@ export function ProjectOverview() {
       isEditMode,
       showSuccess,
       showProjectExistsDialog,
-      existingProjectName
+      existingProjectName,
+      databaseType,
+      embeddingModel,
+      rerankerModel
     },
     setSelectedProject,
     setProjectFiles,
@@ -104,11 +125,15 @@ export function ProjectOverview() {
     setIsEditMode,
     setShowSuccess,
     setShowProjectExistsDialog,
-    setExistingProjectName
+    setExistingProjectName,
+    setDatabaseType,
+    setEmbeddingModel,
+    setRerankerModel
   } = useAppStore()
 
   // 添加加载状态
   const [isFetchingTools, setIsFetchingTools] = useState(false)
+  const [isVectorizing, setIsVectorizing] = useState(false)
 
   useEffect(() => {
     // Fetch the list of project folders
@@ -186,6 +211,17 @@ export function ProjectOverview() {
           setMcpToolsCode(projectData.mcpToolsCode)
         } else {
           setMcpToolsCode("")
+        }
+
+        // 设置向量数据库和模型配置
+        if (projectData.databaseType) {
+          setDatabaseType(projectData.databaseType)
+        }
+        if (projectData.embeddingModel) {
+          setEmbeddingModel(projectData.embeddingModel)
+        }
+        if (projectData.rerankerModel) {
+          setRerankerModel(projectData.rerankerModel)
         }
 
         setIsEditMode(false) // 选择已存在的项目时，默认为查看模式
@@ -270,7 +306,10 @@ export function ProjectOverview() {
           knowledgeBaseFiles: knowledgeBaseFiles,
           fileData: knowledgeBaseFileData,
           mcpTools: mcpTools,
-          mcpToolsCode: mcpToolsCode
+          mcpToolsCode: mcpToolsCode,
+          databaseType: databaseType,
+          embeddingModel: embeddingModel,
+          rerankerModel: rerankerModel
         }),
       })
 
@@ -346,6 +385,9 @@ export function ProjectOverview() {
           fileData: knowledgeBaseFileData,
           mcpTools: mcpTools,
           mcpToolsCode: mcpToolsCode,
+          databaseType: databaseType,
+          embeddingModel: embeddingModel,
+          rerankerModel: rerankerModel,
           force: true
         }),
       })
@@ -557,6 +599,43 @@ export function ProjectOverview() {
     processDroppedItems()
   }
 
+  // 向量化知识库功能
+  const vectorizeKnowledgeBase = async () => {
+    if (knowledgeBaseFiles.length === 0) {
+      alert('请先选择知识库文件');
+      return;
+    }
+
+    setIsVectorizing(true);
+    try {
+      const response = await fetch('/api/vectorize-knowledge', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          projectName: projectName.trim(),
+          databaseType: databaseType,
+          embeddingModel: embeddingModel,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || '向量化失败');
+      }
+
+      // 显示成功消息
+      alert(`知识库向量化成功！\n数据库类型: ${result.databaseType}\n嵌入模型: ${result.embeddingModel}`);
+    } catch (error) {
+      console.error('向量化知识库失败:', error);
+      alert(`向量化失败: ${error instanceof Error ? error.message : '未知错误'}`);
+    } finally {
+      setIsVectorizing(false);
+    }
+  };
+
   const clearKnowledgeBaseFiles = () => {
     setKnowledgeBaseFiles([])
     setKnowledgeBaseFileData([])
@@ -717,6 +796,50 @@ export function ProjectOverview() {
     }
   }
 
+  const [configOptions, setConfigOptions] = useState<ConfigOptions>({
+    databaseTypes: [],
+    embeddingModels: [],
+    rerankerModels: [],
+  });
+  const [configError, setConfigError] = useState<string | null>(null);
+
+  // 2. 使用 useEffect 在组件加载时获取配置
+  useEffect(() => {
+    async function fetchConfig() {
+      try {
+        const response = await fetch('/api/vectorize-config');
+        if (!response.ok) {
+          throw new Error('无法从服务器获取配置选项。');
+        }
+        const data: ConfigOptions = await response.json();
+        setConfigOptions(data);
+
+        // 初始化 AppStore 中的状态
+        if (data.databaseTypes?.length > 0) {
+          if (!databaseType || !data.databaseTypes.includes(databaseType)) {
+            setDatabaseType(data.databaseTypes[0]);
+          }
+        }
+
+        if (data.embeddingModels?.length > 0) {
+          if (!embeddingModel || !data.embeddingModels.some(m => m.name === embeddingModel)) {
+            setEmbeddingModel(data.embeddingModels[0].name);
+          }
+        }
+
+        if (data.rerankerModels?.length > 0) {
+          if (!rerankerModel || !data.rerankerModels.some(m => m.name === rerankerModel)) {
+            setRerankerModel(data.rerankerModels[0].name);
+          }
+        }
+      } catch (error) {
+        console.error("获取配置失败:", error);
+        setConfigError(error instanceof Error ? error.message : "未知错误");
+      }
+    }
+    fetchConfig();
+  }, []);
+
   return (
     <div className="p-4 md:p-8 max-w-full md:max-w-4xl lg:max-w-5xl xl:max-w-6xl mx-auto">
       <div className="mb-6 border-b border-border pb-4 md:mb-8">
@@ -849,6 +972,116 @@ export function ProjectOverview() {
               </div>
             </div>
           )}
+
+          {/* 向量数据库和模型配置区域 */}
+          <div className="space-y-6">
+            <h2 className="text-lg font-medium text-foreground">向量数据库和模型配置</h2>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* 向量数据库选择 */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">
+                  向量数据库类型
+                </label>
+                <select
+                  value={databaseType}
+                  onChange={(e) => setDatabaseType(e.target.value)}
+                  disabled={!isEditMode || isLoading}
+                  className="w-full p-2 border border-border rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {configOptions.databaseTypes.map((type) => (
+                    <option key={type} value={type}>
+                      {type}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-muted-foreground">
+                  选择用于向量存储的数据库
+                </p>
+              </div>
+
+              {/* 向量模型选择 */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">
+                  向量嵌入模型
+                </label>
+                <select
+                  value={embeddingModel}
+                  onChange={(e) => setEmbeddingModel(e.target.value)}
+                  disabled={!isEditMode || isLoading}
+                  className="w-full p-2 border border-border rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {configOptions.embeddingModels.map((model) => (
+                    <option key={model.name} value={model.name}>
+                      {model.name} ({model.dimensions}维)
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-muted-foreground">
+                  用于将文本转换为向量的嵌入模型
+                </p>
+              </div>
+
+              {/* 重排序模型选择 */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">
+                  重排序模型
+                </label>
+                <select
+                  value={rerankerModel}
+                  onChange={(e) => setRerankerModel(e.target.value)}
+                  disabled={!isEditMode || isLoading}
+                  className="w-full p-2 border border-border rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {configOptions.rerankerModels.map((model) => (
+                    <option key={model.name} value={model.name}>
+                      {model.name.split('/').pop()} {/* 只显示模型名称部分 */}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-muted-foreground">
+                  用于优化搜索结果相关性的重排序模型
+                </p>
+              </div>
+
+              {/* 向量化知识库按钮 */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">
+                  知识库向量化
+                </label>
+                <Button
+                  onClick={vectorizeKnowledgeBase}
+                  className="flex items-center gap-2 disabled:opacity-50 w-full"
+                  disabled={!isEditMode || isLoading || isVectorizing || knowledgeBaseFiles.length === 0}
+                >
+                  {isVectorizing ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      向量化中...
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="h-4 w-4" />
+                      向量化知识库
+                    </>
+                  )}
+                </Button>
+                <p className="text-xs text-muted-foreground">
+                  将知识库文件转换为向量数据用于语义搜索
+                </p>
+              </div>
+            </div>
+
+            {/* 模型配置说明 */}
+            <div className="bg-muted/30 rounded-lg p-4">
+              <h3 className="text-sm font-medium text-foreground mb-2">当前配置说明</h3>
+              <div className="text-xs text-muted-foreground space-y-1">
+                <p><strong>向量数据库:</strong> {databaseType}</p>
+                <p><strong>嵌入模型:</strong> {embeddingModel} ({configOptions.embeddingModels.find(m => m.name === embeddingModel)?.dimensions || '...'}维)</p>
+                <p><strong>重排序模型:</strong> {configOptions.rerankerModels.find(m => m.name === rerankerModel)?.description}</p>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* MCP Tools 区域 */}

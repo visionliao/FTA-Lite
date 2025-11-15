@@ -10,15 +10,23 @@ import { universalChunker } from '../core/chunker';
 import { getEmbedding, getEmbeddings } from '../core/embed-config';
 
 class OllamaEmbeddingFunction implements EmbeddingFunction {
+  constructor(private modelName: string) {}
+
   // ChromaDB 批量向量化文本
   public async generate(texts: string[]): Promise<number[][]> {
-    return getEmbeddings(texts);
+    return getEmbeddings(texts, this.modelName);
   }
 }
 
 export class ChromaDB implements DataAccess {
   private collection!: Collection;
   private collectionName = "knowledge_base"; // 定义 collection 名称
+  private embeddingModel: string;
+
+  constructor(embeddingModel?: string) {
+    this.embeddingModel = embeddingModel || process.env.EMBEDDING_MODEL_TYPE!;
+    console.log(`ChromaDB instance created for embedding model: ${this.embeddingModel}`);
+  }
 
   async init(): Promise<void> {
     // init 的职责保持不变，获取或创建 collection
@@ -26,7 +34,7 @@ export class ChromaDB implements DataAccess {
     try {
       this.collection = await client.getOrCreateCollection({
         name: this.collectionName,
-        embeddingFunction: new OllamaEmbeddingFunction(),
+        embeddingFunction: new OllamaEmbeddingFunction(this.embeddingModel),
         // 指定元数据，设置距离计算方法
         metadata: { "hnsw:space": "cosine" },
       });
@@ -52,7 +60,7 @@ export class ChromaDB implements DataAccess {
     }
     this.collection = await client.getOrCreateCollection({
         name: this.collectionName,
-        embeddingFunction: new OllamaEmbeddingFunction(),
+        embeddingFunction: new OllamaEmbeddingFunction(this.embeddingModel),
         metadata: { "hnsw:space": "cosine" },
     });
     console.log(`- Collection "${this.collectionName}" created/ensured.`);
@@ -105,7 +113,7 @@ export class ChromaDB implements DataAccess {
     }
 
     try {
-      const queryEmbedding = await getEmbedding(query, 'search_query');
+      const queryEmbedding = await getEmbedding(query, 'search_query', this.embeddingModel);
       const results = await this.collection.query({
         queryEmbeddings: [queryEmbedding],  // <-- 提供查询文本
         nResults: topK,
