@@ -2,8 +2,12 @@
 import { NextResponse } from "next/server"
 import { getDbInstance } from "@/lib/db"
 import { join } from "path"
+import { initializeGlobalProxy } from "@/lib/llm/model-service";
 
 export async function POST(request: Request) {
+  // 如果调用的是Google Gen AI的向量模型，必须要配置网络代理。
+  initializeGlobalProxy();
+
   try {
     const body = await request.json()
     const { projectName, databaseType, embeddingModel } = body

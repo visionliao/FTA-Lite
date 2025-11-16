@@ -77,7 +77,7 @@ export class ChromaDB implements DataAccess {
     console.log(`Found ${files.length} files. Processing...`);
 
     for (const fileName of files) {
-      if (path.extname(fileName) !== '.txt') continue;
+      if (path.extname(fileName) !== '.md' && path.extname(fileName) !== '.txt') continue;
 
       const content = await fs.readFile(path.join(directoryPath, fileName), 'utf-8');
 

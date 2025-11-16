@@ -10,7 +10,7 @@ let isProxyInitialized = false;
  * 检查环境变量并设置全局网络代理。
  * 这将拦截所有由 undici（Next.js 后端 fetch 的基础）发出的请求。
  */
-function initializeGlobalProxy() {
+export function initializeGlobalProxy() {
   if (isProxyInitialized) {
     return;
   }

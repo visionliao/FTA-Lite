@@ -1,5 +1,19 @@
 // lib/db/core/embed-config.ts
 import { getEmbeddingModels as getAllEmbeddingModels } from '../../config/database-config';
+import { GoogleGenAI } from "@google/genai";
+
+// Google Gen AI 客户端单例
+let genAIClient: GoogleGenAI | null = null;
+function getGoogleGenAIClient(): GoogleGenAI {
+  if (!genAIClient) {
+    if (!process.env.GOOGLE_API_KEY) {
+      throw new Error("配置错误: 环境变量 GOOGLE_API_KEY 未定义。请在 .env 文件中设置它。");
+    }
+    genAIClient = new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY });
+    console.log("[Embedding Service] Google GenAI (New SDK) Client initialized.");
+  }
+  return genAIClient;
+}
 
 /**
  * 获取模型向量维度。
@@ -27,34 +41,61 @@ export function getModelDimensions(modelName?: string): number {
 }
 
 /**
- * 通用的向量化函数，会根据模型名称自动处理特定逻辑（如添加前缀）。
- * @param text 要向量化的文本
- * @param task 任务类型，用于模型特定的前缀处理
- * @returns 向量数组 (number[])
+ * Google AI SDK 获取 Gemini 模型的向量
  */
-export async function getEmbedding(
+async function getGeminiEmbedding(
   text: string,
   task: 'search_query' | 'search_document',
-  modelName?: string
+  modelName: string
 ): Promise<number[]> {
-  // 1. 配置在“运行时”才被读取和校验
+  const ai = getGoogleGenAIClient();
+
+  // 从配置中获取为该模型设定的维度
+  const outputDimension = getModelDimensions(modelName);
+  console.log(`[Embedding Service] Generating Gemini embedding with output dimension: ${outputDimension}`);
+
+  // 映射任务类型到 Gemini SDK 的 TaskType
+  const taskType = task === 'search_document'
+      ? 'RETRIEVAL_DOCUMENT'
+      : 'RETRIEVAL_QUERY';
+
+  const result = await ai.models.embedContent({
+    model: modelName,
+    contents: [text],
+    config: {
+      taskType: taskType,
+      outputDimensionality: outputDimension,
+    },
+  });
+
+  const embeddings = result.embeddings;
+  if (!embeddings) {
+    throw new Error('Gemini API failed to return a valid embedding.');
+  }
+  const embedding = embeddings[0]
+  if (!embedding || !embedding.values) {
+    throw new Error('Gemini API failed to return a valid embedding.');
+  }
+  return embedding.values;
+}
+
+/**
+ * 获取本地 Ollama 模型的向量
+ */
+async function getOllamaEmbedding(
+  text: string,
+  task: 'search_query' | 'search_document',
+  modelName: string
+): Promise<number[]> {
   const apiUrl = process.env.EMBEDDING_MODEL_URL;
   if (!apiUrl) {
     throw new Error("配置错误: 环境变量 EMBEDDING_MODEL_URL 未定义。");
   }
 
-  const OLLAMA_MODEL = process.env.EMBEDDING_MODEL_TYPE;
-  const effectiveModel = modelName || OLLAMA_MODEL;
-  if (!effectiveModel) {
-    throw new Error("getEmbedding 函数调用错误: 必须提供 modelName 参数。");
-  }
-
   let processedText = text;
 
-  // nomic-embed-text 这个模型为了在检索任务中达到最佳效果，其开发者建议在生成向量时，
-  // 根据文本的用途（是用于存储的文档，还是用于搜索的查询）添加不同的前缀。这样做可以使查询向量和文档向量在向量空间中的分布更有利于检索。
-  // 而 qwen-embedding 这样的模型，则没有这个前缀要求。
-  if (effectiveModel.includes('nomic-embed-text')) {
+  // nomic-embed-text 模型需要特定前缀
+  if (modelName.includes('nomic-embed-text')) {
     processedText = `${task}: ${text}`;
   }
 
@@ -62,7 +103,7 @@ export async function getEmbedding(
   const response = await fetch(apiUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: effectiveModel, prompt: processedText }),
+    body: JSON.stringify({ model: modelName, prompt: processedText }),
   });
 
   if (!response.ok) {
@@ -73,6 +114,33 @@ export async function getEmbedding(
 
   const data = await response.json() as { embedding: number[] };
   return data.embedding;
+}
+
+/**
+ * 通用的向量化函数，会根据模型名称自动处理特定逻辑（如添加前缀）。
+ * @param text 要向量化的文本
+ * @param task 任务类型，用于模型特定的前缀处理
+ * @returns 向量数组 (number[])
+ */
+export async function getEmbedding(
+  text: string,
+  task: 'search_query' | 'search_document',
+  modelName?: string
+): Promise<number[]> {
+  const effectiveModel = modelName || process.env.EMBEDDING_MODEL_TYPE;
+  if (!effectiveModel) {
+    throw new Error("getEmbedding 函数调用错误: 必须提供 modelName 参数。");
+  }
+
+  if (effectiveModel.includes('gemini-embedding')) {
+    // 如果是 Gemini 模型，调用 Google AI 的函数
+    console.log(`[Embedding Service] Using Google AI provider for model: ${effectiveModel}`);
+    return getGeminiEmbedding(text, task, effectiveModel);
+  } else {
+    // 否则，默认使用 Ollama 的函数
+    console.log(`[Embedding Service] Using Ollama provider for model: ${effectiveModel}`);
+    return getOllamaEmbedding(text, task, effectiveModel);
+  }
 }
 
 /**
