@@ -25,12 +25,17 @@ const DEFAULT_CHUNK_OVERLAP = 200; // 重叠部分200，以减少冗余
 export async function universalChunker(content: string): Promise<string[]> {
   // 在分块前，统一处理换行符
   // 这能自动适应 Windows (CRLF) 和 Linux/macOS (LF) 的文件
-  const normalizedContent = content.replace(/\r\n/g, '\n');
+  let normalizedContent = content.replace(/\r\n/g, '\n');
 
-  // --- 策略探测：检查文本是否符合 QA 格式 ---
+  // --- 移除第一行元数据 ---
+  // 匹配字符串开头(^)的 #type: 内容，直到遇到换行符或字符串结束，将其替换为空(适配中文、英文冒号)
+  // \n? 确保连同这一行后面的换行符也一起删掉，这样第二行就会变成新的第一行，不会留下空行
+  normalizedContent = normalizedContent.replace(/^#type[:：].*\n?/, '');
+
+  // --- 策略探测：检查文本是否符合 QA 格式（适配中文、英文冒号） ---
   // 我们定义一个简单的规则：如果文本中包含超过 5 个 "Q:" 或 "A:"，
   // 并且这些问答对之间由双换行符分隔，我们就认为它是 QA 格式。
-  const qaPattern = /(Q:|A:|问：|答：)/g;
+  const qaPattern = /(Q|A|问|答)[:：]/g;
   const doubleNewlinePattern = /\n\s*\n/g; // 匹配至少一个空行
 
   const qaMatches = (normalizedContent.match(qaPattern) || []).length;

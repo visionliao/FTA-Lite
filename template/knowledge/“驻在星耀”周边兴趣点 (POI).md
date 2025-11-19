@@ -1,3 +1,4 @@
+#type:local-spark-building
 交通
 地铁站:
 宝山路站:
