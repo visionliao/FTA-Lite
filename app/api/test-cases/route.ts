@@ -18,33 +18,48 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const data = await request.json()
-    const { action, id, question, answer, score } = data
+    const { action, id, question, answer, score, tag, source } = data
 
     // 读取现有数据
     const fileData = await fs.readFile(TEST_CASES_PATH, 'utf-8')
-    const testCases = JSON.parse(fileData)
+    let questions = JSON.parse(fileData)
 
-    let newCheck
+    if (!Array.isArray(questions)) {
+      // 容错处理：如果文件损坏或为空
+      questions = []
+    }
 
     switch (action) {
       case 'add':
-        newCheck = {
-          id: Math.max(...testCases.checks.map((c: any) => c.id), 0) + 1,
+        const newId = questions.length > 0
+          ? Math.max(...questions.map((c: any) => c.id)) + 1
+          : 1
+
+        questions.push({
+          id: newId,
+          tag: tag || "",
+          source: "用户自定义",
           question,
           answer,
           score: score || 10
-        }
-        testCases.checks.push(newCheck)
+        })
         break
 
       case 'edit':
-        testCases.checks = testCases.checks.map((check: any) => 
-          check.id === id ? { ...check, question, answer, score: score || 10 } : check
+        questions = questions.map((item: any) =>
+          item.id === id ? {
+            ...item,
+            question,
+            answer,
+            score: score || 10,
+            tag: tag || "",
+            source: source
+          } : item
         )
         break
 
       case 'delete':
-        testCases.checks = testCases.checks.filter((check: any) => check.id !== id)
+        questions = questions.filter((item: any) => item.id !== id)
         break
 
       default:
@@ -52,9 +67,9 @@ export async function POST(request: NextRequest) {
     }
 
     // 写入文件
-    await fs.writeFile(TEST_CASES_PATH, JSON.stringify(testCases, null, 2), 'utf-8')
+    await fs.writeFile(TEST_CASES_PATH, JSON.stringify(questions, null, 2), 'utf-8')
 
-    return NextResponse.json({ success: true, data: testCases })
+    return NextResponse.json({ success: true, data: questions })
   } catch (error) {
     console.error('Error updating test cases:', error)
     return NextResponse.json({ error: 'Failed to update test cases' }, { status: 500 })

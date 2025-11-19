@@ -1,14 +1,16 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { AlertTriangle } from "lucide-react"
-import { Pencil, Trash2, X, Check, Loader2 } from "lucide-react"
+import { Pencil, Trash2, X, Check, Loader2, Tag, FileText } from "lucide-react"
 
 interface Question {
   id: number
+  tag: string
+  source: string
   question: string
   answer: string
   score: number
@@ -18,17 +20,50 @@ export function TestQuestions() {
   const [questions, setQuestions] = useState<Question[]>([])
   const [loading, setLoading] = useState(true)
 
+  // 编辑
   const [editingId, setEditingId] = useState<number | null>(null)
+  const [editTagParts, setEditTagParts] = useState<string[]>([])
+  const [editSource, setEditSource] = useState("")
   const [editQuestion, setEditQuestion] = useState("")
   const [editAnswer, setEditAnswer] = useState("")
   const [editScore, setEditScore] = useState(10)
 
+  // 新增
   const [isAdding, setIsAdding] = useState(false)
+  const [newTagParts, setNewTagParts] = useState<string[]>([])
   const [newQuestion, setNewQuestion] = useState("")
   const [newAnswer, setNewAnswer] = useState("")
   const [newScore, setNewScore] = useState(10)
+
   const [saving, setSaving] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<number | null>(null)
+
+  // 计算数据中出现Tag最大层级深度（例如 local-spark-qa 是3层）
+  const maxTagLevels = useMemo(() => {
+    let max = 0
+    questions.forEach(q => {
+      const parts = (q.tag || "").split("-")
+      if (parts.length > max) max = parts.length
+    })
+    return max > 0 ? max : 3 // 默认为3层
+  }, [questions])
+
+  // 计算每一层有哪些可选值
+  // 返回结构如: [ ["local", "global"], ["spark", "other"], ["qa", "building"] ]
+  const tagOptions = useMemo(() => {
+    const options: Set<string>[] = Array.from({ length: maxTagLevels }, () => new Set())
+
+    questions.forEach(q => {
+      const parts = (q.tag || "").split("-")
+      parts.forEach((part, index) => {
+        if (index < maxTagLevels && part) {
+          options[index].add(part)
+        }
+      })
+    })
+
+    return options.map(set => Array.from(set))
+  }, [questions, maxTagLevels])
 
   // 加载测试题
   useEffect(() => {
@@ -37,7 +72,7 @@ export function TestQuestions() {
         const response = await fetch("/api/test-cases")
         if (response.ok) {
           const data = await response.json()
-          setQuestions(data.checks)
+          setQuestions(data)
         }
       } catch (error) {
         console.error("Failed to load questions:", error)
@@ -49,11 +84,27 @@ export function TestQuestions() {
     loadQuestions()
   }, [])
 
+  // 初始化新增时的默认标签
+  useEffect(() => {
+    if (isAdding && newTagParts.length === 0) {
+      setNewTagParts(Array(maxTagLevels).fill(""))
+    }
+  }, [isAdding, maxTagLevels, newTagParts.length])
+
   const handleEdit = (question: Question) => {
     setEditingId(question.id)
     setEditQuestion(question.question)
     setEditAnswer(question.answer)
     setEditScore(question.score)
+    setEditSource(question.source || "")
+
+    // 初始化标签下拉框
+    const parts = question.tag ? question.tag.split("-") : []
+    // 补齐数组长度，用空字符串填充，绝不使用 default
+    while (parts.length < maxTagLevels) {
+      parts.push("")
+    }
+    setEditTagParts(parts)
 
     // 延迟调整高度，确保 DOM 更新后执行
     setTimeout(() => {
@@ -74,6 +125,7 @@ export function TestQuestions() {
   const handleSaveEdit = async (id: number) => {
     setSaving(true)
     try {
+      const finalTag = editTagParts.filter(p => p.trim() !== "").join("-")
       const response = await fetch('/api/test-cases', {
         method: 'POST',
         headers: {
@@ -84,13 +136,15 @@ export function TestQuestions() {
           id,
           question: editQuestion,
           answer: editAnswer,
-          score: editScore
+          score: editScore,
+          tag: finalTag,
+          source: editSource
         }),
       })
 
       if (response.ok) {
         const data = await response.json()
-        setQuestions(data.data.checks)
+        setQuestions(data.data)
         setEditingId(null)
         setEditQuestion("")
         setEditAnswer("")
@@ -135,7 +189,7 @@ export function TestQuestions() {
 
       if (response.ok) {
         const data = await response.json()
-        setQuestions(data.data.checks)
+        setQuestions(data.data)
         setShowDeleteConfirm(null)
       } else {
         alert('删除失败')
@@ -156,6 +210,7 @@ export function TestQuestions() {
     if (newQuestion.trim() && newAnswer.trim()) {
       setSaving(true)
       try {
+        const finalTag = newTagParts.filter(p => p.trim() !== "").join("-")
         const response = await fetch('/api/test-cases', {
           method: 'POST',
           headers: {
@@ -165,16 +220,18 @@ export function TestQuestions() {
             action: 'add',
             question: newQuestion,
             answer: newAnswer,
-            score: newScore
+            score: newScore,
+            tag: finalTag
           }),
         })
 
         if (response.ok) {
           const data = await response.json()
-          setQuestions(data.data.checks)
+          setQuestions(data.data)
           setNewQuestion("")
           setNewAnswer("")
           setNewScore(10)
+          setNewTagParts(Array(maxTagLevels).fill(""))
           setIsAdding(false)
         } else {
           alert('添加失败')
@@ -217,17 +274,13 @@ export function TestQuestions() {
 
       <div className="space-y-4">
         {questions.map((question) => (
-          <div key={question.id} className="border border-border rounded-lg p-4 space-y-3 bg-background">
+          // 添加 'group' 类，使子元素的 group-hover 生效
+          <div key={question.id} className="border border-border rounded-lg p-4 space-y-3 bg-background group hover:shadow-sm transition-all">
             {editingId === question.id ? (
               <>
+                {/* 编辑模式：问题 */}
                 <div className="space-y-2">
                   <textarea
-                    ref={(el) => {
-                      if (el) {
-                        el.style.height = "auto"
-                        el.style.height = el.scrollHeight + "px"
-                      }
-                    }}
                     value={editQuestion}
                     onChange={(e) => {
                       setEditQuestion(e.target.value)
@@ -235,23 +288,14 @@ export function TestQuestions() {
                       e.target.style.height = e.target.scrollHeight + "px"
                     }}
                     placeholder="请输入问题..."
-                    className="w-full px-0 py-2 text-sm bg-transparent border-0 border-b border-border focus:border-foreground focus:outline-none resize-none transition-colors overflow-hidden"
+                    className="w-full px-0 py-2 text-base font-medium bg-transparent border-0 border-b border-border focus:border-foreground focus:outline-none resize-none"
                     rows={1}
-                    onInput={(e) => {
-                      const target = e.target as HTMLTextAreaElement
-                      target.style.height = "auto"
-                      target.style.height = target.scrollHeight + "px"
-                    }}
                   />
                 </div>
+
+                {/* 编辑模式：答案 */}
                 <div className="space-y-2">
                   <textarea
-                    ref={(el) => {
-                      if (el) {
-                        el.style.height = "auto"
-                        el.style.height = el.scrollHeight + "px"
-                      }
-                    }}
                     value={editAnswer}
                     onChange={(e) => {
                       setEditAnswer(e.target.value)
@@ -259,63 +303,91 @@ export function TestQuestions() {
                       e.target.style.height = e.target.scrollHeight + "px"
                     }}
                     placeholder="请输入标准答案..."
-                    className="w-full px-0 py-2 text-sm bg-transparent border-0 border-b border-border focus:border-foreground focus:outline-none resize-none transition-colors overflow-hidden"
+                    className="w-full px-0 py-2 text-sm text-muted-foreground bg-transparent border-0 border-b border-border focus:border-foreground focus:outline-none resize-none"
                     rows={1}
-                    onInput={(e) => {
-                      const target = e.target as HTMLTextAreaElement
-                      target.style.height = "auto"
-                      target.style.height = target.scrollHeight + "px"
-                    }}
                   />
                 </div>
-                <div className="flex justify-end gap-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleCancelEdit}
-                    disabled={saving}
-                    className="text-muted-foreground hover:text-foreground"
-                  >
-                    <X className="h-4 w-4 mr-1" />
-                    取消
-                  </Button>
-                  <Button
-                    size="sm"
-                    onClick={() => handleSaveEdit(question.id)}
-                    disabled={saving}
-                    className="bg-foreground text-background hover:bg-foreground/90"
-                  >
-                    {saving ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Check className="h-4 w-4 mr-1" />}
-                    确定
-                  </Button>
+
+                {/* 编辑模式：标签 */}
+                <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pt-2">
+                  <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+                    <span className="text-xs text-muted-foreground mr-1">标签:</span>
+                    {Array.from({ length: maxTagLevels }).map((_, index) => (
+                      <select
+                        key={index}
+                        value={editTagParts[index] || ""}
+                        onChange={(e) => {
+                          const newParts = [...editTagParts]
+                          newParts[index] = e.target.value
+                          setEditTagParts(newParts)
+                        }}
+                        className="h-8 rounded-md border border-input bg-background px-2 py-1 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      >
+                        {/* 增加空选项，不强制默认值 */}
+                        <option value="">--</option>
+                        {tagOptions[index]?.map((opt) => (
+                          <option key={opt} value={opt}>{opt}</option>
+                        ))}
+                      </select>
+                    ))}
+                  </div>
+
+                  <div className="flex justify-end gap-2 w-full md:w-auto">
+                    <Button variant="ghost" size="sm" onClick={handleCancelEdit} disabled={saving}>
+                      <X className="h-4 w-4 mr-1" /> 取消
+                    </Button>
+                    <Button size="sm" onClick={() => handleSaveEdit(question.id)} disabled={saving}>
+                      {saving ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Check className="h-4 w-4 mr-1" />} 确定
+                    </Button>
+                  </div>
                 </div>
               </>
             ) : (
               <>
-                <div className="space-y-2">
-                  <p className="text-sm text-foreground">{question.question}</p>
+                {/* 查看模式：顶部 Badge 区域 */}
+                {/* 只有当 tag 或 source 存在时才渲染这个区域，避免空白占用 */}
+                {(question.tag || question.source) && (
+                  <div className="flex flex-wrap items-center gap-2 mb-1">
+                    {/* 只有当 tag 有值时才显示 */}
+                    {question.tag && (
+                      <div className="flex items-center gap-1 text-xs text-muted-foreground bg-secondary/50 px-2 py-1 rounded-md">
+                        <Tag className="w-3 h-3" />
+                        <span>类型:</span>
+                        <div className="flex gap-1">
+                          {question.tag.split('-').map((part, idx) => (
+                            <span key={idx} className="font-medium text-foreground/80">
+                              {part}
+                              {idx < question.tag.split('-').length - 1 && <span className="mx-0.5 text-muted-foreground/50">/</span>}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 只有当 source 有值时才显示 */}
+                    {question.source && (
+                      <div className="flex items-center gap-1 text-xs text-muted-foreground bg-secondary/30 px-2 py-1 rounded-md">
+                        <FileText className="w-3 h-3" />
+                        <span>来源: {question.source}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="space-y-1">
+                  <p className="text-base font-medium text-foreground">{question.question}</p>
                 </div>
-                <div className="space-y-2">
-                  <p className="text-sm text-muted-foreground whitespace-pre-wrap">{question.answer}</p>
+                <div className="space-y-1">
+                  <p className="text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed">{question.answer}</p>
                 </div>
-                <div className="flex justify-end gap-2 pt-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleEdit(question)}
-                    className="text-muted-foreground hover:text-foreground"
-                  >
-                    <Pencil className="h-4 w-4 mr-1" />
-                    编辑
+
+                {/* group-hover 配合父容器的 group 类 */}
+                <div className="flex justify-end gap-2 pt-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                  <Button variant="ghost" size="sm" onClick={() => handleEdit(question)} className="text-muted-foreground hover:text-foreground h-8 px-2">
+                    <Pencil className="h-3.5 w-3.5 mr-1" /> 编辑
                   </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleDelete(question.id)}
-                    className="text-muted-foreground hover:text-destructive"
-                  >
-                    <Trash2 className="h-4 w-4 mr-1" />
-                    删除
+                  <Button variant="ghost" size="sm" onClick={() => handleDelete(question.id)} className="text-muted-foreground hover:text-destructive h-8 px-2">
+                    <Trash2 className="h-3.5 w-3.5 mr-1" /> 删除
                   </Button>
                 </div>
               </>
@@ -323,6 +395,7 @@ export function TestQuestions() {
           </div>
         ))}
 
+        {/* 新增模式 */}
         {isAdding && (
           <div className="border border-border rounded-lg p-4 space-y-3 bg-background">
             <div className="space-y-2">
@@ -334,13 +407,8 @@ export function TestQuestions() {
                   e.target.style.height = e.target.scrollHeight + "px"
                 }}
                 placeholder="请输入问题..."
-                className="w-full px-0 py-2 text-sm bg-transparent border-0 border-b border-border focus:border-foreground focus:outline-none resize-none transition-colors overflow-hidden"
+                className="w-full px-0 py-2 text-base font-medium bg-transparent border-0 border-b border-border focus:border-foreground focus:outline-none resize-none"
                 rows={1}
-                onInput={(e) => {
-                  const target = e.target as HTMLTextAreaElement
-                  target.style.height = "auto"
-                  target.style.height = target.scrollHeight + "px"
-                }}
               />
             </div>
             <div className="space-y-2">
@@ -352,35 +420,42 @@ export function TestQuestions() {
                   e.target.style.height = e.target.scrollHeight + "px"
                 }}
                 placeholder="请输入标准答案..."
-                className="w-full px-0 py-2 text-sm bg-transparent border-0 border-b border-border focus:border-foreground focus:outline-none resize-none transition-colors overflow-hidden"
+                className="w-full px-0 py-2 text-sm text-muted-foreground bg-transparent border-0 border-b border-border focus:border-foreground focus:outline-none resize-none"
                 rows={1}
-                onInput={(e) => {
-                  const target = e.target as HTMLTextAreaElement
-                  target.style.height = "auto"
-                  target.style.height = target.scrollHeight + "px"
-                }}
               />
             </div>
-            <div className="flex justify-end gap-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleCancelAdd}
-                disabled={saving}
-                className="text-muted-foreground hover:text-foreground"
-              >
-                <X className="h-4 w-4 mr-1" />
-                取消
-              </Button>
-              <Button
-                size="sm"
-                onClick={handleAddQuestion}
-                disabled={saving}
-                className="bg-foreground text-background hover:bg-foreground/90"
-              >
-                {saving ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Check className="h-4 w-4 mr-1" />}
-                确定
-              </Button>
+
+            {/* 新增模式底部：只显示标签选择，不显示来源输入 */}
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pt-2">
+               <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+                  <span className="text-xs text-muted-foreground mr-1">标签:</span>
+                  {Array.from({ length: maxTagLevels }).map((_, index) => (
+                    <select
+                      key={index}
+                      value={newTagParts[index] || ""}
+                      onChange={(e) => {
+                        const newParts = [...newTagParts]
+                        newParts[index] = e.target.value
+                        setNewTagParts(newParts)
+                      }}
+                      className="h-8 rounded-md border border-input bg-background px-2 py-1 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    >
+                      <option value="">--</option>
+                      {tagOptions[index]?.map((opt) => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
+                    </select>
+                  ))}
+               </div>
+
+              <div className="flex justify-end gap-2 w-full md:w-auto">
+                <Button variant="ghost" size="sm" onClick={() => setIsAdding(false)} disabled={saving}>
+                  <X className="h-4 w-4 mr-1" /> 取消
+                </Button>
+                <Button size="sm" onClick={handleAddQuestion} disabled={saving}>
+                  {saving ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Check className="h-4 w-4 mr-1" />} 确定
+                </Button>
+              </div>
             </div>
           </div>
         )}
@@ -394,8 +469,7 @@ export function TestQuestions() {
         )}
       </div>
 
-      {/* 删除确认对话框 */}
-      <Dialog open={showDeleteConfirm !== null} onOpenChange={cancelDelete}>
+      <Dialog open={showDeleteConfirm !== null} onOpenChange={() => setShowDeleteConfirm(null)}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -407,18 +481,11 @@ export function TestQuestions() {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={cancelDelete}>
+            <Button variant="outline" onClick={() => setShowDeleteConfirm(null)}>
               取消
             </Button>
             <Button variant="destructive" onClick={confirmDelete} disabled={saving}>
-              {saving ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  删除中...
-                </>
-              ) : (
-                "删除"
-              )}
+              {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : "删除"}
             </Button>
           </DialogFooter>
         </DialogContent>
