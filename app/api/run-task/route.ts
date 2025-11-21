@@ -269,7 +269,7 @@ async function runTask(config: any, baseResultDir: string, onProgress: (data: ob
         databaseName = databaseType;
         embeddingModelName = embeddingModel;
 
-        console.log(`[RAG] Creating database instance with type: ${databaseType}, embedding model: ${embeddingModel || 'default'}`);
+        console.log(`[RAG] Creating database instance with type: ${databaseType}, embedding model: ${embeddingModel}`);
         const db = await getDbInstance(databaseType, embeddingModel);
 
         const topK = 10;

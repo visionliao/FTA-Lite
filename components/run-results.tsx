@@ -327,9 +327,15 @@ export function RunResults() {
               <div className="text-muted-foreground">
                 数据库: {projectConfig.databaseType || "未设置"}
               </div>
-              <div className="text-muted-foreground">
-                向量模型: {projectConfig.embeddingModel || "未设置"}
-              </div>
+              {projectConfig.databaseType === 'GOOGLE' ? (
+                <div className="text-muted-foreground">
+                  文件商店: {projectConfig.googleStoreName || "未设置"}
+                </div>
+              ) : (
+                <div className="text-muted-foreground">
+                  向量模型: {projectConfig.embeddingModel || "未设置"}
+                </div>
+              )}
               <div className="text-muted-foreground">
                 重排序模型: {projectConfig.rerankerModel || "未设置"}
               </div>
