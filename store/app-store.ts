@@ -85,6 +85,7 @@ interface AppState {
     databaseType: string
     embeddingModel: string
     rerankerModel: string
+    googleStoreName: string
   }
 
   // 模型设置状态
@@ -138,6 +139,7 @@ interface AppState {
   setDatabaseType: (type: string) => void
   setEmbeddingModel: (model: string) => void
   setRerankerModel: (model: string) => void
+  setGoogleStoreName: (name: string) => void
 
   // Model Settings Actions
   updateModelSettingsConfig: (config: Partial<AppState['modelSettingsConfig']>) => void
@@ -210,7 +212,8 @@ export const useAppStore = create<AppState>()(
         // 向量数据库和模型配置默认值
         databaseType: "POSTGRES",
         embeddingModel: "nomic-embed-text:latest",
-        rerankerModel: "BAAI/bge-reranker-v2-m3"
+        rerankerModel: "BAAI/bge-reranker-v2-m3",
+        googleStoreName: ""
       },
 
       // 模型设置默认值
@@ -304,6 +307,9 @@ export const useAppStore = create<AppState>()(
 
       setRerankerModel: (model: string) =>
         get().updateProjectConfig({ rerankerModel: model }),
+
+      setGoogleStoreName: (name: string) =>
+        get().updateProjectConfig({ googleStoreName: name }),
 
       // Model Settings Actions
       updateModelSettingsConfig: (config) => 
@@ -416,6 +422,7 @@ export const useAppStore = create<AppState>()(
           databaseType: state.projectConfig.databaseType,
           embeddingModel: state.projectConfig.embeddingModel,
           rerankerModel: state.projectConfig.rerankerModel,
+          googleStoreName: state.projectConfig.googleStoreName
         },
         modelSettingsConfig: {
           workModel: state.modelSettingsConfig.workModel,

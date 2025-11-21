@@ -109,7 +109,8 @@ export function ProjectOverview() {
       existingProjectName,
       databaseType,
       embeddingModel,
-      rerankerModel
+      rerankerModel,
+      googleStoreName
     },
     setSelectedProject,
     setProjectFiles,
@@ -128,12 +129,15 @@ export function ProjectOverview() {
     setExistingProjectName,
     setDatabaseType,
     setEmbeddingModel,
-    setRerankerModel
+    setRerankerModel,
+    setGoogleStoreName
   } = useAppStore()
 
   // 添加加载状态
   const [isFetchingTools, setIsFetchingTools] = useState(false)
   const [isVectorizing, setIsVectorizing] = useState(false)
+  // 用于控制“覆盖确认”弹窗
+  const [showOverwriteConfirm, setShowOverwriteConfirm] = useState(false)
 
   useEffect(() => {
     // Fetch the list of project folders
@@ -175,6 +179,7 @@ export function ProjectOverview() {
       setKnowledgeBaseFiles([])
       setMcpTools([])
       setMcpToolsCode("")
+      setGoogleStoreName("")
       setIsEditMode(true)
       return
     }
@@ -223,6 +228,12 @@ export function ProjectOverview() {
         if (projectData.rerankerModel) {
           setRerankerModel(projectData.rerankerModel)
         }
+        if (projectData.googleStoreName) {
+            setGoogleStoreName(projectData.googleStoreName)
+        } else {
+            // 兼容旧数据或为空的情况
+            setGoogleStoreName("")
+        }
 
         setIsEditMode(false) // 选择已存在的项目时，默认为查看模式
       } else {
@@ -233,6 +244,52 @@ export function ProjectOverview() {
     } finally {
       setProjectLoading(false)
     }
+  }
+
+  // 通用消息弹窗函数
+  const showMessage = (title: string, message: string) => {
+    const modal = document.createElement('div')
+    // 增加一些背景模糊效果
+    modal.className = 'fixed inset-0 flex items-center justify-center z-50 bg-background/50 backdrop-blur-sm'
+
+    modal.innerHTML = `
+      <div class="bg-card border border-border rounded-lg p-6 max-w-md mx-4 shadow-lg w-full animate-in fade-in zoom-in duration-200">
+        <h3 class="text-lg font-semibold mb-4 text-foreground flex items-center gap-2">
+          ${title}
+        </h3>
+        <p class="text-muted-foreground mb-6 whitespace-pre-line break-words text-sm leading-relaxed">${message}</p>
+        <div class="flex justify-end">
+          <button id="modal-ok" class="px-4 py-2 bg-foreground text-background rounded hover:bg-foreground/90 focus:outline-none focus:ring-2 focus:ring-primary transition-colors text-sm font-medium">
+            确定
+          </button>
+        </div>
+      </div>
+    `
+    document.body.appendChild(modal)
+
+    const closeModal = () => {
+      if (document.body.contains(modal)) {
+        document.body.removeChild(modal)
+      }
+    }
+
+    const okButton = modal.querySelector('#modal-ok') as HTMLElement
+    if (okButton) {
+      okButton.addEventListener('click', closeModal)
+      okButton.focus() // 聚焦按钮方便键盘操作
+    }
+
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) closeModal()
+    })
+
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        closeModal()
+        document.removeEventListener('keydown', handleEscape)
+      }
+    }
+    document.addEventListener('keydown', handleEscape)
   }
 
   const handleSave = async () => {
@@ -246,48 +303,13 @@ export function ProjectOverview() {
       validationErrors.push("系统提示词")
     }
 
+    if (databaseType === 'GOOGLE' && !googleStoreName.trim()) {
+      validationErrors.push("Google File Search Store 名称")
+    }
+
     if (validationErrors.length > 0) {
       const errorMessage = `请填写以下必填项目：\n• ${validationErrors.join("\n• ")}`
-
-      // 创建自定义模态框而不是使用alert，使用项目主题色
-      const modal = document.createElement('div')
-      modal.className = 'fixed inset-0 flex items-center justify-center z-50'
-      modal.innerHTML = `
-        <div class="bg-card border border-border rounded-lg p-6 max-w-md mx-4 shadow-lg">
-          <h3 class="text-lg font-semibold mb-4 text-foreground">提示</h3>
-          <p class="text-muted-foreground mb-6 whitespace-pre-line">${errorMessage}</p>
-          <div class="flex justify-end">
-            <button id="modal-ok" class="px-4 py-2 bg-foreground text-background rounded hover:bg-foreground/90 focus:outline-none focus:ring-2 focus:ring-primary transition-colors">
-              确定
-            </button>
-          </div>
-        </div>
-      `
-      document.body.appendChild(modal)
-
-      // 点击确定按钮关闭模态框
-      const okButton = modal.querySelector('#modal-ok') as HTMLElement
-      const closeModal = () => {
-        document.body.removeChild(modal)
-      }
-      okButton.addEventListener('click', closeModal)
-
-      // 点击背景也可以关闭
-      modal.addEventListener('click', (e) => {
-        if (e.target === modal) {
-          closeModal()
-        }
-      })
-
-      // ESC键关闭
-      const handleEscape = (e: KeyboardEvent) => {
-        if (e.key === 'Escape') {
-          closeModal()
-          document.removeEventListener('keydown', handleEscape)
-        }
-      }
-      document.addEventListener('keydown', handleEscape)
-
+      showMessage("提示", errorMessage)
       return
     }
 
@@ -309,7 +331,8 @@ export function ProjectOverview() {
           mcpToolsCode: mcpToolsCode,
           databaseType: databaseType,
           embeddingModel: embeddingModel,
-          rerankerModel: rerankerModel
+          rerankerModel: rerankerModel,
+          googleStoreName: googleStoreName.trim()
         }),
       })
 
@@ -350,7 +373,7 @@ export function ProjectOverview() {
       console.log("Project saved successfully:", result)
     } catch (error) {
       console.error("Error saving project:", error)
-      alert(`保存失败: ${error instanceof Error ? error.message : "未知错误"}`)
+      showMessage("保存失败", `${error instanceof Error ? error.message : "未知错误"}`)
     } finally {
       setProjectLoading(false)
     }
@@ -388,6 +411,7 @@ export function ProjectOverview() {
           databaseType: databaseType,
           embeddingModel: embeddingModel,
           rerankerModel: rerankerModel,
+          googleStoreName: googleStoreName.trim(),
           force: true
         }),
       })
@@ -423,7 +447,7 @@ export function ProjectOverview() {
       console.log("Project replaced successfully:", result)
     } catch (error) {
       console.error("Error replacing project:", error)
-      alert(`替换项目失败: ${error instanceof Error ? error.message : "未知错误"}`)
+      showMessage("替换项目失败", `${error instanceof Error ? error.message : "未知错误"}`)
     } finally {
       setProjectLoading(false)
       setExistingProjectName("")
@@ -600,13 +624,19 @@ export function ProjectOverview() {
   }
 
   // 向量化知识库功能
-  const vectorizeKnowledgeBase = async () => {
+  const vectorizeKnowledgeBase = async (force: boolean = false) => {
     if (knowledgeBaseFiles.length === 0) {
-      alert('请先选择知识库文件');
+      showMessage("提示", "请先选择知识库文件")
+      return;
+    }
+
+    if (databaseType === 'GOOGLE' && (!googleStoreName || !googleStoreName.trim())) {
+      showMessage("提示", "请输入 Google File Search Store 名称")
       return;
     }
 
     setIsVectorizing(true);
+    setShowOverwriteConfirm(false);
     try {
       const response = await fetch('/api/vectorize-knowledge', {
         method: 'POST',
@@ -617,22 +647,35 @@ export function ProjectOverview() {
           projectName: projectName.trim(),
           databaseType: databaseType,
           embeddingModel: embeddingModel,
+          googleStoreName: googleStoreName.trim(),
+          force: force
         }),
       });
 
       const result = await response.json();
+
+      // 处理 409 Conflict (Google Store 已存在)
+      if (response.status === 409) {
+        setIsVectorizing(false);
+        setShowOverwriteConfirm(true); // 打开 Dialog
+        return;
+      }
 
       if (!response.ok) {
         throw new Error(result.error || '向量化失败');
       }
 
       // 显示成功消息
-      alert(`知识库向量化成功！\n数据库类型: ${result.databaseType}\n嵌入模型: ${result.embeddingModel}`);
+      setIsVectorizing(false);
+      const successMsg = databaseType === 'GOOGLE'
+        ? `文件上传成功！\nStore Name: ${result.googleStoreName}\n已包含 ${knowledgeBaseFiles.length} 个文件。`
+        : `知识库向量化成功！\n数据库类型: ${result.databaseType}\n嵌入模型: ${result.embeddingModel}`
+
+      showMessage("操作成功", successMsg)
     } catch (error) {
       console.error('向量化知识库失败:', error);
-      alert(`向量化失败: ${error instanceof Error ? error.message : '未知错误'}`);
-    } finally {
       setIsVectorizing(false);
+      showMessage("向量化失败", `${error instanceof Error ? error.message : '未知错误'}`)
     }
   };
 
@@ -1000,25 +1043,39 @@ export function ProjectOverview() {
                 </p>
               </div>
 
-              {/* 向量模型选择 */}
+              {/* 动态切换：向量模型 Select 或 Google Store Name Input */}
               <div className="space-y-2">
                 <label className="text-sm font-medium text-foreground">
-                  向量嵌入模型
+                  {databaseType === 'GOOGLE' ? '文件商店名称 (Store Name)' : '向量嵌入模型'}
                 </label>
-                <select
-                  value={embeddingModel}
-                  onChange={(e) => setEmbeddingModel(e.target.value)}
-                  disabled={!isEditMode || isLoading}
-                  className="w-full p-2 border border-border rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {configOptions.embeddingModels.map((model) => (
-                    <option key={model.name} value={model.name}>
-                      {model.name} ({model.dimensions}维)
-                    </option>
-                  ))}
-                </select>
+
+                {databaseType === 'GOOGLE' ? (
+                  <Input
+                    value={googleStoreName}
+                    onChange={(e) => setGoogleStoreName(e.target.value)}
+                    placeholder="输入Google文件商店名称..."
+                    disabled={!isEditMode || isLoading}
+                    className="h-[42px]" // 强制高度与 select 对齐
+                  />
+                ) : (
+                  <select
+                    value={embeddingModel}
+                    onChange={(e) => setEmbeddingModel(e.target.value)}
+                    disabled={!isEditMode || isLoading}
+                    className="w-full p-2 border border-border rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {configOptions.embeddingModels.map((model) => (
+                      <option key={model.name} value={model.name}>
+                        {model.name} ({model.dimensions}维)
+                      </option>
+                    ))}
+                  </select>
+                )}
+
                 <p className="text-xs text-muted-foreground">
-                  用于将文本转换为向量的嵌入模型
+                  {databaseType === 'GOOGLE'
+                    ? 'Google File Search Store 的唯一标识'
+                    : '用于将文本转换为向量的嵌入模型'}
                 </p>
               </div>
 
@@ -1044,30 +1101,39 @@ export function ProjectOverview() {
                 </p>
               </div>
 
-              {/* 向量化知识库按钮 */}
+              {/* 向量化/上传 按钮 (根据 databaseType 变字) */}
               <div className="space-y-2">
                 <label className="text-sm font-medium text-foreground">
-                  知识库向量化
+                  {databaseType === 'GOOGLE' ? '上传至 Google 云端' : '知识库向量化'}
                 </label>
                 <Button
-                  onClick={vectorizeKnowledgeBase}
+                  onClick={() => vectorizeKnowledgeBase(false)} // 默认不强制
                   className="flex items-center gap-2 disabled:opacity-50 w-full"
                   disabled={!isEditMode || isLoading || isVectorizing || knowledgeBaseFiles.length === 0}
                 >
                   {isVectorizing ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      向量化中...
+                      {databaseType === 'GOOGLE' ? '处理中...' : '向量化中...'}
                     </>
                   ) : (
-                    <>
-                      <RefreshCw className="h-4 w-4" />
-                      向量化知识库
-                    </>
+                    databaseType === 'GOOGLE' ? (
+                      <>
+                        <Upload className="h-4 w-4" />
+                        上传并索引
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="h-4 w-4" />
+                        向量化知识库
+                      </>
+                    )
                   )}
                 </Button>
                 <p className="text-xs text-muted-foreground">
-                  将知识库文件转换为向量数据用于语义搜索
+                  {databaseType === 'GOOGLE'
+                    ? '上传文件至 Google File Search Store'
+                    : '将知识库文件转换为向量数据'}
                 </p>
               </div>
             </div>
@@ -1077,7 +1143,12 @@ export function ProjectOverview() {
               <h3 className="text-sm font-medium text-foreground mb-2">当前配置说明</h3>
               <div className="text-xs text-muted-foreground space-y-1">
                 <p><strong>向量数据库:</strong> {databaseType}</p>
-                <p><strong>嵌入模型:</strong> {embeddingModel} ({configOptions.embeddingModels.find(m => m.name === embeddingModel)?.dimensions || '...'}维)</p>
+                {/* 根据数据库类型动态显示 */}
+                {databaseType === 'GOOGLE' ? (
+                  <p><strong>文件搜索商店:</strong> {googleStoreName || '未设置'}</p>
+                ) : (
+                  <p><strong>嵌入模型:</strong> {embeddingModel} ({configOptions.embeddingModels.find(m => m.name === embeddingModel)?.dimensions || '...'}维)</p>
+                )}
                 <p><strong>重排序模型:</strong> {configOptions.rerankerModels.find(m => m.name === rerankerModel)?.description}</p>
               </div>
             </div>
@@ -1246,6 +1317,43 @@ export function ProjectOverview() {
                 </>
               ) : (
                 "替换"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Google Store 覆盖确认 Dialog (复用 Dialog 组件) */}
+      <Dialog open={showOverwriteConfirm} onOpenChange={setShowOverwriteConfirm}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              商店名称已存在
+            </DialogTitle>
+            <DialogDescription className="pt-2">
+              Google 云端已存在名为 <span className="font-medium text-foreground">"{googleStoreName}"</span> 的文件搜索商店。
+              <br /><br />
+              是否要覆盖它？<br/>
+              <span className="text-red-500">注意：这将删除该商店中现有的所有文件，并上传当前选择的文件。</span>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsVectorizing(false)}>
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => vectorizeKnowledgeBase(true)}
+              disabled={isVectorizing} // 点击后禁用防止连点
+            >
+              {isVectorizing ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  覆盖中...
+                </>
+              ) : (
+                "确定覆盖"
               )}
             </Button>
           </DialogFooter>

@@ -54,6 +54,11 @@ export const getDbInstance = async (
     // case 'DATABRICKS':
     //   newInstance = new DatabricksDB();
     //   break;
+    case 'GOOGLE':
+      // Google File Search 不需要本地 embedding 模型
+      const { GoogleFileSearch } = await import('./google');
+      newInstance = new GoogleFileSearch(embeddingModel);
+      break;
     default:
       throw new Error(`Unsupported DATABASE_TYPE: ${effectiveDbType}. Check your .env config.`);
   }

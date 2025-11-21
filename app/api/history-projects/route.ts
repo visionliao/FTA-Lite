@@ -78,7 +78,8 @@ async function getProjectData(projectName: string) {
       mcpToolsCode: "",
       databaseType: "",
       embeddingModel: "",
-      rerankerModel: ""
+      rerankerModel: "",
+      googleStoreName: ""
     }
 
     try {
@@ -161,6 +162,8 @@ async function getProjectData(projectName: string) {
               projectData.embeddingModel = trimmedLine.replace('- 向量嵌入模型:', '').trim()
             } else if (trimmedLine.startsWith('- 重排序模型:')) {
               projectData.rerankerModel = trimmedLine.replace('- 重排序模型:', '').trim()
+            } else if (trimmedLine.startsWith('- 文件搜索商店:')) {
+              projectData.googleStoreName = trimmedLine.replace('- 文件搜索商店:', '').trim()
             }
           }
         }

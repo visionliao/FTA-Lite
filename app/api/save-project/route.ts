@@ -5,7 +5,7 @@ import { join } from "path"
 export async function POST(request: Request) {
   try {
     const body = await request.json()
-    const { projectName, systemPrompt, knowledgeBaseFiles, mcpTools, mcpToolsCode, databaseType, embeddingModel, rerankerModel, force } = body
+    const { projectName, systemPrompt, knowledgeBaseFiles, mcpTools, mcpToolsCode, databaseType, embeddingModel, rerankerModel, googleStoreName, force } = body
 
     if (!projectName) {
       return NextResponse.json({ error: "项目名称不能为空" }, { status: 400 })
@@ -137,7 +137,7 @@ ${mcpToolsCode || '无'}
 - 向量数据库类型: ${databaseType || 'POSTGRES'}
 - 向量嵌入模型: ${embeddingModel || 'nomic-embed-text:latest'}
 - 重排序模型: ${rerankerModel || 'BAAI/bge-reranker-v2-m3'}
-
+- 文件搜索商店: ${googleStoreName || ''}
 ## 文件生成时间
 ${new Date().toLocaleString('zh-CN')}
 `

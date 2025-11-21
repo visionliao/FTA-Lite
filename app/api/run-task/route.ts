@@ -253,11 +253,19 @@ async function runTask(config: any, baseResultDir: string, onProgress: (data: ob
 
         // 2. 获取数据库实例，使用用户配置的数据库类型和嵌入模型
         const databaseType = config.project.databaseType || process.env.DATABASE_TYPE;
-        const embeddingModel = config.project.embeddingModel;
+        let embeddingModel = config.project.embeddingModel;
 
         if (!databaseType) {
           throw new Error("Database type must be configured in project settings or DATABASE_TYPE environment variable.");
         }
+        if (databaseType === 'GOOGLE') {
+          embeddingModel = config.project.googleStoreName;
+          // 安全检查
+          if (!embeddingModel) {
+            throw new Error("Google File Search 模式下，Store Name 不能为空。请检查项目配置。");
+          }
+        }
+
         databaseName = databaseType;
         embeddingModelName = embeddingModel;
 
