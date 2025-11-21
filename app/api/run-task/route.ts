@@ -308,13 +308,22 @@ async function runTask(config: any, baseResultDir: string, onProgress: (data: ob
 
         // 5. 相似度阈值过滤与日志记录
         const SIMILARITY_THRESHOLD = 0.8;
-        const filteredChunks = finalChunks.filter(chunk => (chunk.similarity ?? 0) >= SIMILARITY_THRESHOLD);
-        console.log(`相似度阈值过滤后，剩余 ${filteredChunks.length} 个区块。`);
-        console.log(`--------------------------------------------------\n`);
+        let finalContextChunks = finalChunks.filter(chunk => (chunk.similarity ?? 0) >= SIMILARITY_THRESHOLD);
+        console.log(`相似度阈值过滤后，剩余 ${finalContextChunks.length} 个区块。`);
 
         // 6. 构建用于增强提示词的上下文
-        if (filteredChunks.length > 0) {
-          const context = filteredChunks.map(chunk => `- ${chunk.content}`).join('\n');
+        if (finalContextChunks.length === 0 && relevantChunks.length > 0) {
+          console.log(`[RAG] 警告: 重排序/过滤后结果为空，正在回退使用原始数据库检索的前 3 个结果作为上下文。`);
+          finalContextChunks = relevantChunks.slice(0, 3).map(chunk => ({
+                ...chunk,
+                similarity: chunk.similarity ?? 0 // 如果原始 similarity 为 undefined，赋值为 0，满足类型要求
+            }));
+        }
+        console.log(`最终用于构建上下文的区块数量: ${finalContextChunks.length}`);
+        console.log(`--------------------------------------------------\n`);
+
+        if (finalContextChunks.length > 0) {
+          const context = finalContextChunks.map(chunk => `- ${chunk.content}`).join('\n');
           augmentedPrompt = `
           ---
           【知识库知识】
@@ -325,7 +334,9 @@ async function runTask(config: any, baseResultDir: string, onProgress: (data: ob
           ${testCase.question}
           `;
         } else {
-          augmentedPrompt = testCase.question
+          // 极端情况：原始数据库也没有查到任何相关内容
+          console.log(`[RAG] 警告: 未能检索到任何相关知识，将直接使用原始问题。`);
+          augmentedPrompt = testCase.question;
         }
       } catch (dbError: any) {
         console.error("[RAG] Database query failed:", dbError);
@@ -463,6 +474,8 @@ async function runTask(config: any, baseResultDir: string, onProgress: (data: ob
 
       const resultEntry = {
         id: testCase.id,
+        tag: testCase.tag,
+        source: testCase.source,
         question: testCase.question,
         standardAnswer: testCase.answer,
         modelAnswer,

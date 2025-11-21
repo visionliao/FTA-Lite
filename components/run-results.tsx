@@ -76,11 +76,12 @@ export function RunResults() {
         const response = await fetch("/api/test-cases")
         if (response.ok) {
           const data = await response.json()
-          setTestCases(data.checks) // 存储完整的测试用例
-          setTestCasesCount(data.checks.length)
+          const cases = Array.isArray(data) ? data : (data.checks || [])
+          setTestCases(cases) // 存储完整的测试用例
+          setTestCasesCount(cases.length)
 
           // 计算总分
-          const totalScore = data.checks.reduce((sum: number, question: any) => sum + (question.score || 0), 0)
+          const totalScore = cases.reduce((sum: number, question: any) => sum + (question.score || 0), 0)
           setTotalTestScore(totalScore)
         }
       } catch (error) {
