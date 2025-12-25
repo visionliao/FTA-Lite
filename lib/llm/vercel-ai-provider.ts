@@ -11,6 +11,7 @@ import {
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
+import { createDeepSeek } from '@ai-sdk/deepseek';
 import { ChatMessage, ToolCall, TokenUsage, DurationUsage, StreamingResult, LlmProviderResponse, BaseProviderConfig } from './types';
 import { McpToolSchema } from './tools/tool-client';
 import { getToolClientInstance } from './tools/tool-client-manager';
@@ -49,6 +50,21 @@ export class VercelAIProvider {
           baseURL: this.proxyUrl, // 可选,用于代理
         });
         return anthropicProvider(modelName);
+
+      // deepseek
+      case 'deepseek':
+        const deepseekAsOpenAI = createOpenAI({
+          baseURL: this.proxyUrl,
+          apiKey: this.apiKey,
+        });
+        // 直接返回模型实例，不需要任何 hack
+        return deepseekAsOpenAI.chat(modelName);
+
+        // const deepseekProvider = createDeepSeek({
+        //   apiKey: this.apiKey,
+        //   baseURL: this.proxyUrl, // 可选,用于代理
+        // });
+        // return deepseekProvider(modelName);
 
       // ollama本地模型
       case 'ollama':
@@ -133,16 +149,25 @@ export class VercelAIProvider {
         };
       }
       if (msg.role === 'assistant' && msg.tool_calls) {
+        const content: any[] = [];
+        // 如果原始消息里有 reasoning（推理内容），必须带上
+        if ((msg as any).reasoning) {
+          content.push({ type: 'text', text: (msg as any).reasoning });
+        } else if (typeof msg.content === 'string' && msg.content) {
+          content.push({ type: 'text', text: msg.content });
+        }
+        content.push({
+          type: 'tool-calls' as const,
+          toolCalls: msg.tool_calls.map(tc => ({
+            toolCallId: tc.id,
+            toolName: tc.function.name,
+            args: JSON.parse(tc.function.arguments)
+          }))
+        });
+
         return {
           role: 'assistant' as const,
-          content: [{
-            type: 'tool-calls' as const,
-            toolCalls: msg.tool_calls.map(tc => ({
-              toolCallId: tc.id,
-              toolName: tc.function.name,
-              args: JSON.parse(tc.function.arguments)
-            }))
-          }]
+          content: content
         };
       }
       return { role: msg.role, content: msg.content };

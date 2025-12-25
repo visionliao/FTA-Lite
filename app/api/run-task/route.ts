@@ -80,6 +80,15 @@ function getTimestamp() {
   return `${year}${month}${day}_${hours}${minutes}${seconds}`
 }
 
+// 获取当前日期，严格符合 YYYY-MM-DD 格式
+function getCurrentDate() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 // Helper to send SSE messages in the correct format
 function sendEvent(controller: ReadableStreamDefaultController, data: object) {
   try {
@@ -278,7 +287,7 @@ async function runTask(config: any, baseResultDir: string, onProgress: (data: ob
         const dbQueryEndTime = performance.now(); // 记录结束时间
         dbQueryDuration = (dbQueryEndTime - dbQueryStartTime);
 
-        console.log(`\n\n[RAG DEBUG - 问题 #${testCase.id}]`);
+        console.log(`\n\n[RAG DEBUG - 问题 #${testCase.id}]\n${testCase.question}`);
         console.log(`--------------------------------------------------`);
         console.log(`数据库查询耗时: ${dbQueryDuration} ms`);
         console.log(`检索到的 Top ${topK} 个原始区块 (relevantChunks):`);
@@ -315,36 +324,62 @@ async function runTask(config: any, baseResultDir: string, onProgress: (data: ob
         });
 
         // 5. 相似度阈值过滤与日志记录
-        const SIMILARITY_THRESHOLD = 0.8;
+        const SIMILARITY_THRESHOLD = 0.2;
         let finalContextChunks = finalChunks.filter(chunk => (chunk.similarity ?? 0) >= SIMILARITY_THRESHOLD);
         console.log(`相似度阈值过滤后，剩余 ${finalContextChunks.length} 个区块。`);
 
         // 6. 构建用于增强提示词的上下文
+        let meetStandard = true;
         if (finalContextChunks.length === 0 && relevantChunks.length > 0) {
           console.log(`[RAG] 警告: 重排序/过滤后结果为空，正在回退使用原始数据库检索的前 3 个结果作为上下文。`);
           finalContextChunks = relevantChunks.slice(0, 3).map(chunk => ({
                 ...chunk,
                 similarity: chunk.similarity ?? 0 // 如果原始 similarity 为 undefined，赋值为 0，满足类型要求
             }));
+            meetStandard = false;
         }
         console.log(`最终用于构建上下文的区块数量: ${finalContextChunks.length}`);
         console.log(`--------------------------------------------------\n`);
 
+        const currentDate = getCurrentDate();
         if (finalContextChunks.length > 0) {
           const context = finalContextChunks.map(chunk => `- ${chunk.content}`).join('\n');
+          if (meetStandard) {
+            augmentedPrompt = `
+            ---
+            【当前日期：${currentDate}】
+            【重要提示：积极参考以下知识库知识进行总结回复，只有在知识库知识完全无法回答用户问题的时候，才需要调用工具进行回答。调用工具必须先规划步骤，然后一步步执行直到获得最终结果。】
+            【知识库知识】
+            ${context}
+            ---
+
+            【用户问题】
+            ${testCase.question}
+            `;
+          } else {
+            augmentedPrompt = `
+            ---
+            【当前日期：${currentDate}】
+            【重要提示：参考以下知识库知识内容，如果知识库的内容无法很好的回复用户问题，则应当积极调用相关工具来获取额外的知识，最终总结回复给用户。调用工具必须先规划步骤，然后一步步执行直到获得最终结果。】
+            【知识库知识】
+            ${context}
+            ---
+
+            【用户问题】
+            ${testCase.question}
+            `;
+          }
+        } else {
+          console.log(`[RAG] 警告: 未能检索到任何相关知识，直接使用原始问题，并提示大模型积极使用工具。`);
           augmentedPrompt = `
           ---
-          【知识库知识】
-          ${context}
+          【当前日期：${currentDate}】
+          【重要提示：积极使用工具来回复用户问题，调用工具必须先规划步骤，然后一步步执行直到获得最终结果。】
           ---
 
           【用户问题】
           ${testCase.question}
           `;
-        } else {
-          // 极端情况：原始数据库也没有查到任何相关内容
-          console.log(`[RAG] 警告: 未能检索到任何相关知识，将直接使用原始问题。`);
-          augmentedPrompt = testCase.question;
         }
       } catch (dbError: any) {
         console.error("[RAG] Database query failed:", dbError);
@@ -489,8 +524,10 @@ async function runTask(config: any, baseResultDir: string, onProgress: (data: ob
         modelAnswer,
         maxScore: testCase.score,
         score: score,
+        workModel: config.models.work,
         workTokenUsage: workTokenUsage,
         workDurationUsage: workDurationUsage,
+        scoreModel: config.models.score,
         scoreTokenUsage: scoreTokenUsage,
         scoreDurationUsage: scoreDurationUsage,
         dbQueryDuration: dbQueryDuration,
