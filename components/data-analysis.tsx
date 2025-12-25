@@ -15,8 +15,10 @@ interface QuestionResult {
   modelAnswer: string
   maxScore: number
   score: number
+  workModel: string // 工作模型
   workTokenUsage: number
   workDurationUsage: number
+  scoreModel: string // 评分模型
   scoreTokenUsage: number
   scoreDurationUsage: number
   dbQueryDuration?: number // 查询向量数据库耗时
@@ -24,7 +26,7 @@ interface QuestionResult {
   databaseName?: string // 数据库名称
   embeddingModelName?: string // 嵌入模型名称
   rerankModelName?: string // 重排序模型名称
-  loop?: string // 新增字段，用于标识来自哪个轮次
+  loop?: string // 用于标识来自哪个轮次
   // 全部选项时使用的字段（所有轮次的总和）
   totalWorkTokenUsage?: number
   totalWorkDurationUsage?: number
@@ -388,6 +390,12 @@ export function DataAnalysis() {
                   <div className="text-center">
                     <p className="font-medium text-muted-foreground">总token消耗</p>
                     <p className="text-lg font-bold text-green-600">{formatToken(loopResults.totalTokenUsage)}</p>
+                    <p className="text-xs text-green-500 mt-1 truncate max-w-full" title={loopResults.results[0]?.workModel}>
+                      {loopResults.results[0]?.workModel || "N/A"}
+                    </p>
+                    <p className="text-xs text-green-500 mt-1 truncate max-w-full" title={loopResults.results[0]?.scoreModel}>
+                      {loopResults.results[0]?.scoreModel || "N/A"}
+                    </p>
                   </div>
                   <div className="text-center">
                     <p className="font-medium text-muted-foreground">查询平均耗时</p>
