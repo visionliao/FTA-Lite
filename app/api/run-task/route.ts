@@ -183,17 +183,17 @@ async function runTask(config: any, baseResultDir: string, onProgress: (data: ob
 
   // 创建基础项目上下文（不包含MCP工具）
   let baseProjectContext = `# 系统提示词\n${config.project.systemPrompt}\n\n`
-  // const knowledgeDir = join(process.cwd(), "output", "project", config.project.projectName, "knowledge")
-  // try {
-  //   const knowledgeFiles = await readdir(knowledgeDir)
-  //   for (const fileName of knowledgeFiles) {
-  //     const content = await readFile(join(knowledgeDir, fileName), 'utf-8')
-  //     baseProjectContext += `## 知识库文件: ${fileName}\n${content}\n\n`
-  //     console.error(`读取知识库文件 ${fileName} 成功， 上下文长度: ${baseProjectContext.length}`);
-  //   }
-  // } catch (e) {
-  //     onProgress({ type: 'log', message: `警告: 未找到或无法读取知识库目录: ${knowledgeDir}` })
-  // }
+  const knowledgeDir = join(process.cwd(), "output", "project", config.project.projectName, "knowledge")
+  try {
+    const knowledgeFiles = await readdir(knowledgeDir)
+    for (const fileName of knowledgeFiles) {
+      const content = await readFile(join(knowledgeDir, fileName), 'utf-8')
+      baseProjectContext += `## 知识库文件: ${fileName}\n${content}\n\n`
+      console.error(`读取知识库文件 ${fileName} 成功， 上下文长度: ${baseProjectContext.length}`);
+    }
+  } catch (e) {
+      onProgress({ type: 'log', message: `警告: 未找到或无法读取知识库目录: ${knowledgeDir}` })
+  }
 
   // 创建用于工作模型的上下文（不包含MCP工具JSON）
   const workContext = baseProjectContext
@@ -341,46 +341,48 @@ async function runTask(config: any, baseResultDir: string, onProgress: (data: ob
         console.log(`最终用于构建上下文的区块数量: ${finalContextChunks.length}`);
         console.log(`--------------------------------------------------\n`);
 
-        const currentDate = getCurrentDate();
-        if (finalContextChunks.length > 0) {
-          const context = finalContextChunks.map(chunk => `- ${chunk.content}`).join('\n');
-          if (meetStandard) {
-            augmentedPrompt = `
-            ---
-            【当前日期：${currentDate}】
-            【重要提示：积极参考以下知识库知识进行总结回复，只有在知识库知识完全无法回答用户问题的时候，才需要调用工具进行回答。调用工具必须先规划步骤，然后一步步执行直到获得最终结果。】
-            【知识库知识】
-            ${context}
-            ---
+        // const currentDate = getCurrentDate();
+        // if (finalContextChunks.length > 0) {
+        //   const context = finalContextChunks.map(chunk => `- ${chunk.content}`).join('\n');
+        //   if (meetStandard) {
+        //     augmentedPrompt = `
+        //     ---
+        //     【当前日期：${currentDate}】
+        //     【重要提示：积极参考以下知识库知识进行总结回复，只有在知识库知识完全无法回答用户问题的时候，才需要调用工具进行回答。调用工具必须先规划步骤，然后一步步执行直到获得最终结果。】
+        //     【知识库知识】
+        //     ${context}
+        //     ---
 
-            【用户问题】
-            ${testCase.question}
-            `;
-          } else {
-            augmentedPrompt = `
-            ---
-            【当前日期：${currentDate}】
-            【重要提示：参考以下知识库知识内容，如果知识库的内容无法很好的回复用户问题，则应当积极调用相关工具来获取额外的知识，最终总结回复给用户。调用工具必须先规划步骤，然后一步步执行直到获得最终结果。】
-            【知识库知识】
-            ${context}
-            ---
+        //     【用户问题】
+        //     ${testCase.question}
+        //     `;
+        //   } else {
+        //     augmentedPrompt = `
+        //     ---
+        //     【当前日期：${currentDate}】
+        //     【重要提示：参考以下知识库知识内容，如果知识库的内容无法很好的回复用户问题，则应当积极调用相关工具来获取额外的知识，最终总结回复给用户。调用工具必须先规划步骤，然后一步步执行直到获得最终结果。】
+        //     【知识库知识】
+        //     ${context}
+        //     ---
 
-            【用户问题】
-            ${testCase.question}
-            `;
-          }
-        } else {
-          console.log(`[RAG] 警告: 未能检索到任何相关知识，直接使用原始问题，并提示大模型积极使用工具。`);
-          augmentedPrompt = `
-          ---
-          【当前日期：${currentDate}】
-          【重要提示：积极使用工具来回复用户问题，调用工具必须先规划步骤，然后一步步执行直到获得最终结果。】
-          ---
+        //     【用户问题】
+        //     ${testCase.question}
+        //     `;
+        //   }
+        // } else {
+        //   console.log(`[RAG] 警告: 未能检索到任何相关知识，直接使用原始问题，并提示大模型积极使用工具。`);
+        //   augmentedPrompt = `
+        //   ---
+        //   【当前日期：${currentDate}】
+        //   【重要提示：积极使用工具来回复用户问题，调用工具必须先规划步骤，然后一步步执行直到获得最终结果。】
+        //   ---
 
-          【用户问题】
-          ${testCase.question}
-          `;
-        }
+        //   【用户问题】
+        //   ${testCase.question}
+        //   `;
+        // }
+
+        augmentedPrompt = testCase.question;
       } catch (dbError: any) {
         console.error("[RAG] Database query failed:", dbError);
         onProgress({ type: 'log', message: `警告: 数据库检索失败，将使用原始问题继续。错误: ${dbError.message}` });

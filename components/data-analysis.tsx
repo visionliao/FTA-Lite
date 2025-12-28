@@ -5,7 +5,8 @@ import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Card, CardContent } from "@/components/ui/card"
-import { BarChart3, Camera } from "lucide-react"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { BarChart3, Camera, CheckCircle, AlertCircle, Loader2 } from "lucide-react"
 import { useScreenshot } from "@/hooks/useScreenshot"
 
 interface QuestionResult {
@@ -69,6 +70,15 @@ export function DataAnalysis() {
   // 截图相关状态
   const reportRef = useRef<HTMLDivElement>(null)
   const { captureScreenshot, isCapturing: isCapturingScreenshot, error: screenshotError } = useScreenshot()
+
+  // 弹窗相关状态
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false)
+  const [showSuccessDialog, setShowSuccessDialog] = useState(false)
+  const [showErrorDialog, setShowErrorDialog] = useState(false)
+  const [dialogMessage, setDialogMessage] = useState("")
+  const [pendingQuestionId, setPendingQuestionId] = useState<number | null>(null)
+  const [pendingModelAnswer, setPendingModelAnswer] = useState<string>("")
+  const [isUpdating, setIsUpdating] = useState(false)
 
   // 加载结果目录
   useEffect(() => {
@@ -276,6 +286,62 @@ export function DataAnalysis() {
     } catch (error) {
       console.error("Failed to capture screenshot:", error)
       alert("截图保存失败，请重试")
+    }
+  }
+
+  // 处理"设为标准答案"按钮点击 - 显示确认对话框
+  const handleSetAsStandardAnswer = (questionId: number, modelAnswer: string) => {
+    if (!selectedDirectory || !selectedLoop) {
+      setDialogMessage("无法获取测试信息")
+      setShowErrorDialog(true)
+      return
+    }
+
+    setPendingQuestionId(questionId)
+    setPendingModelAnswer(modelAnswer)
+    setShowConfirmDialog(true)
+  }
+
+  // 确认更新标准答案
+  const confirmUpdateStandardAnswer = async () => {
+    if (pendingQuestionId === null || !pendingModelAnswer) return
+
+    setIsUpdating(true)
+    setShowConfirmDialog(false)
+
+    try {
+      const response = await fetch("/api/update-standard-answer", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          questionId: pendingQuestionId,
+          modelAnswer: pendingModelAnswer,
+          loop: selectedLoop,
+          directory: selectedDirectory
+        })
+      })
+
+      const data = await response.json()
+
+      if (data.success) {
+        setDialogMessage(`问题 #${pendingQuestionId} 的标准答案已更新，分数已设置为 ${data.maxScore} 分。`)
+        setShowSuccessDialog(true)
+        // 重新加载当前数据
+        await analyzeResults()
+      } else {
+        setDialogMessage(data.error || "更新标准答案失败")
+        setShowErrorDialog(true)
+      }
+    } catch (error) {
+      console.error("Failed to set standard answer:", error)
+      setDialogMessage("更新标准答案失败，请重试")
+      setShowErrorDialog(true)
+    } finally {
+      setIsUpdating(false)
+      setPendingQuestionId(null)
+      setPendingModelAnswer("")
     }
   }
 
@@ -557,6 +623,19 @@ export function DataAnalysis() {
                     </div>
                   )}
                 </div>
+
+                {/* 第六行：操作按钮 */}
+                <div className="flex items-center justify-between mt-3 pt-3 border-t border-black/10">
+                  <div></div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-xs h-7 px-3"
+                    onClick={() => handleSetAsStandardAnswer(result.id, result.modelAnswer)}
+                  >
+                    设为标准答案
+                  </Button>
+                </div>
               </div>
             ))}
           </div>
@@ -573,6 +652,79 @@ export function DataAnalysis() {
             </CardContent>
           </Card>
         )}
+
+        {/* 确认对话框 */}
+        <Dialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <AlertCircle className="h-5 w-5 text-amber-500" />
+                确认设置标准答案
+              </DialogTitle>
+              <DialogDescription>
+                确定要将此模型回答设为问题 #{pendingQuestionId} 的标准答案吗？
+              </DialogDescription>
+            </DialogHeader>
+            <div className="text-sm text-muted-foreground">
+              这将更新测试题集文件和测试结果中的分数。
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowConfirmDialog(false)} disabled={isUpdating}>
+                取消
+              </Button>
+              <Button onClick={confirmUpdateStandardAnswer} disabled={isUpdating}>
+                {isUpdating ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    更新中...
+                  </>
+                ) : (
+                  "确认"
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* 成功对话框 */}
+        <Dialog open={showSuccessDialog} onOpenChange={setShowSuccessDialog}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <CheckCircle className="h-5 w-5 text-green-500" />
+                操作成功
+              </DialogTitle>
+            </DialogHeader>
+            <div className="text-sm text-muted-foreground">
+              {dialogMessage}
+            </div>
+            <DialogFooter>
+              <Button onClick={() => setShowSuccessDialog(false)}>
+                我知道了
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* 错误对话框 */}
+        <Dialog open={showErrorDialog} onOpenChange={setShowErrorDialog}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <AlertCircle className="h-5 w-5 text-red-500" />
+                操作失败
+              </DialogTitle>
+            </DialogHeader>
+            <div className="text-sm text-muted-foreground">
+              {dialogMessage}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowErrorDialog(false)}>
+                关闭
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   )
